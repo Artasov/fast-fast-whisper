@@ -265,3 +265,4 @@ dist
 # Temporary folders
 tmp/
 temp/
+test_recognize
