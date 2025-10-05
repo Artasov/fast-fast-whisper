@@ -26,6 +26,7 @@ dependencies = [
     "srt>=3.5.3",
     "webvtt-py>=0.5.1",
     "av==12.3.0",
+    "hf-xet (>=1.1.10,<2.0.0)",
 ]
 
 [project.urls]
