@@ -9,27 +9,22 @@ from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import PlainTextResponse, JSONResponse
 from pydantic import BaseModel
 
-# Optional: lazy imports so app can start even if heavy deps are not ready
 try:
     from faster_whisper import WhisperModel
 except Exception:  # pragma: no cover
     WhisperModel = None  # type: ignore
 
-import srt as srt_lib
-import webvtt
 
-# Настройка логирования
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('whisper_api.log', encoding='utf-8')
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-# Добавляем логирование при запуске
 logger.info("=== Fast-Fast-Whisper API запущен ===")
 print("=== Fast-Fast-Whisper API запущен ===")
 
@@ -101,37 +96,8 @@ def _get_cuda_diagnostic_info() -> str:
     return "\n".join(info)
 
 
-class ModelInfo(BaseModel):
-    id: str
-    object: str = "model"
-    created: int
-    owned_by: str = "system"
-
-
-class ModelList(BaseModel):
-    object: str = "list"
-    data: List[ModelInfo]
-
-
-class VerboseSegment(BaseModel):
-    id: int
-    seek: int
-    start: float
-    end: float
+class _SimpleResponse(BaseModel):
     text: str
-    tokens: List[int] = []
-    temperature: float = 0.0
-    avg_logprob: float = 0.0
-    compression_ratio: float = 0.0
-    no_speech_prob: float = 0.0
-
-
-class VerboseResponse(BaseModel):
-    task: str = "transcribe"
-    language: Optional[str]
-    duration: Optional[float]
-    text: str
-    segments: List[VerboseSegment]
 
 
 app = FastAPI(title="fast-fast-whisper", version="0.1.0")
@@ -369,28 +335,12 @@ def root() -> Dict[str, str]:
     return {"message": "fast-fast-whisper: local OpenAI-compatible Whisper API"}
 
 
-@app.get("/v1/models", response_model=ModelList)
-def list_models() -> ModelList:
-    # Возвращаем список всех поддерживаемых моделей Whisper
-    created = int(time.time())
-    models = []
-    for model_name in SUPPORTED_MODELS:
-        models.append(ModelInfo(
-            id=model_name,
-            created=created,
-            owned_by="openai"
-        ))
-    return ModelList(data=models)
-
-
 def _validate_file(upload: UploadFile) -> None:
     if not upload:
         raise HTTPException(status_code=400, detail="Missing file")
-    # OpenAI accepts many types; we just ensure it's a binary file
     if upload.content_type and not (
             upload.content_type.startswith("audio/") or upload.content_type.startswith("video/")
     ):
-        # Still allow; some clients don't set correct content_type
         pass
 
 
@@ -398,44 +348,6 @@ async def _read_upload_to_memory(upload: UploadFile) -> io.BytesIO:
     data = await upload.read()
     if not data: raise HTTPException(status_code=400, detail="Empty file")
     return io.BytesIO(data)
-
-
-def _as_srt(segments: List[Dict[str, Any]]) -> str:
-    items = []
-    for idx, seg in enumerate(segments, start=1):
-        start = seg.get("start", 0.0)
-        end = seg.get("end", 0.0)
-        text = (seg.get("text") or "").strip()
-        items.append(
-            srt_lib.Subtitle(
-                index=idx,
-                start=srt_lib.timedelta(seconds=float(max(0.0, start))),
-                end=srt_lib.timedelta(seconds=float(max(0.0, end))),
-                content=text,
-            )
-        )
-    return srt_lib.compose(items)
-
-
-def _as_vtt(segments: List[Dict[str, Any]]) -> str:
-    vtt = webvtt.WebVTT()
-    for seg in segments:
-        start = float(seg.get("start", 0.0))
-        end = float(seg.get("end", 0.0))
-        text = (seg.get("text") or "").strip()
-
-        def fmt(ts: float) -> str:
-            ms = int(ts * 1000)
-            hh, rem = divmod(ms, 3_600_000)
-            mm, rem = divmod(rem, 60_000)
-            ss, ms = divmod(rem, 1000)
-            return f"{hh:02d}:{mm:02d}:{ss:02d}.{ms:03d}"
-
-        caption = webvtt.Caption(fmt(start), fmt(end), text)
-        vtt.captions.append(caption)
-    buf = io.StringIO()
-    vtt.write(buf)
-    return buf.getvalue()
 
 
 async def _handle_transcription(
@@ -448,16 +360,12 @@ async def _handle_transcription(
         device: Optional[str],
         translate: bool,
 ):
-    # Логируем входящий запрос
     logger.info(f"Получен запрос на {'перевод' if translate else 'транскрипцию'}: "
                f"модель={model}, формат={response_format}, язык={language}, "
                f"температура={temperature}, устройство={device}, файл={file.filename}, размер={file.size if hasattr(file, 'size') else 'неизвестен'}")
     
     _validate_file(file)
-    # Валидируем и нормализуем имя модели
     model_name = _validate_model(model)
-    
-    # Валидируем параметр device
     if device is not None:
         device = device.lower().strip()
         if device not in ['cpu', 'cuda', 'gpu', 'auto']:
@@ -465,7 +373,6 @@ async def _handle_transcription(
                 status_code=400,
                 detail=f"Invalid device: {device}. Supported devices: cpu, cuda, gpu, auto"
             )
-        # Нормализуем gpu -> cuda
         if device == 'gpu':
             device = 'cuda'
 
@@ -483,7 +390,6 @@ async def _handle_transcription(
     text = result["text"]
     segments = result["segments"]
 
-    # Логируем результат обработки
     logger.info(f"Обработка завершена: результат содержит {len(segments)} сегментов, "
                f"общая длина текста: {len(text)} символов")
 
@@ -492,21 +398,8 @@ async def _handle_transcription(
         return JSONResponse(content={"text": text})
     if fmt == "text":
         return PlainTextResponse(content=text, media_type="text/plain; charset=utf-8")
-    if fmt == "srt":
-        return PlainTextResponse(content=_as_srt(segments), media_type="application/x-subrip")
-    if fmt == "vtt":
-        return PlainTextResponse(content=_as_vtt(segments), media_type="text/vtt")
-    if fmt == "verbose_json":
-        payload = VerboseResponse(
-            task="translate" if translate else "transcribe",
-            language=result.get("language"),
-            duration=result.get("duration"),
-            text=text,
-            segments=[VerboseSegment(**s) for s in segments],
-        )
-        return JSONResponse(content=payload.model_dump())
 
-    raise HTTPException(status_code=400, detail=f"Unsupported response_format: {response_format}")
+    raise HTTPException(status_code=400, detail=f"Unsupported response_format: {response_format}. Use json or text")
 
 
 @app.post("/v1/audio/transcriptions")
@@ -531,60 +424,11 @@ async def transcriptions(
     )
 
 
-@app.post("/v1/audio/translations")
-async def translations(
-        file: UploadFile = File(...),
-        model: str = Form(...),
-        prompt: Optional[str] = Form(None),
-        response_format: str = Form("json"),
-        temperature: Optional[float] = Form(None),
-        language: Optional[str] = Form(None),
-        device: Optional[str] = Form(None),
-):
-    # For translations, we force translate=True regardless of language
-    return await _handle_transcription(
-        file=file,
-        model=model,
-        prompt=prompt,
-        response_format=response_format,
-        temperature=temperature,
-        language=language,
-        device=device,
-        translate=True,
-    )
-
-
-@app.get("/healthz")
-def healthz() -> Dict[str, str]:
+@app.get("/health")
+def health() -> Dict[str, str]:
     try:
-        # Trigger lazy-model creation check only, without heavy load
         _ = _env("WHISPER_MODEL", "base")
         return {"status": "ok"}
     except Exception as e:  # pragma: no cover
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.post("/clear_cache")
-def clear_cache() -> Dict[str, str]:
-    """Очищает кэш моделей для перезагрузки"""
-    try:
-        WhisperEngine.clear_cache()
-        return {"status": "cache cleared"}
-    except Exception as e:  # pragma: no cover
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/cuda_diagnostic")
-def cuda_diagnostic() -> Dict[str, str]:
-    """Возвращает диагностическую информацию о CUDA"""
-    try:
-        diagnostic_info = _get_cuda_diagnostic_info()
-        return {
-            "status": "ok",
-            "diagnostic": diagnostic_info
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "diagnostic": f"Ошибка при получении диагностики: {e}"
-        }

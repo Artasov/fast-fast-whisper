@@ -45,7 +45,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 Health check:
 
 ```bash
-curl http://localhost:8000/healthz
+curl http://localhost:8000/health
 ```
 
 ## Environment Variables

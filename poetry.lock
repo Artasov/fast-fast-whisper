@@ -1035,17 +1035,6 @@ files = [
 ]
 
 [[package]]
-name = "srt"
-version = "3.5.3"
-description = "A tiny library for parsing, modifying, and composing SRT files."
-optional = false
-python-versions = ">=2.7"
-groups = ["main"]
-files = [
-    {file = "srt-3.5.3.tar.gz", hash = "sha256:4884315043a4f0740fd1f878ed6caa376ac06d70e135f306a6dc44632eed0cc0"},
-]
-
-[[package]]
 name = "starlette"
 version = "0.48.0"
 description = "The little ASGI library that shines."
@@ -1474,4 +1463,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "d1d33a887bf21b70a5f378032d306b46e397f681fce86606b84ceec5be1cfce1"
+content-hash = "657c5239a89433f221527ca2e727f88ba494aa4da7bb8660d672a6e262d94b61"
