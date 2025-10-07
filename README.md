@@ -7,6 +7,7 @@ A simple local OpenAI-compatible API for audio transcription based on Whisper (f
 ### In `powershell`:
 
 ```sh
+cd C:\ # or any other directory
 git clone https://github.com/Artasov/fast-fast-whisper.git
 cd fast-fast-whisper
 .\start.bat
