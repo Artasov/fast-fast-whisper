@@ -17,7 +17,7 @@ echo ---------------------------------
 if exist "%PY_EXE%" goto venv
 
 echo ---------------------------------
-echo [INFO] Portable Python не найден — загружаю NuGet-пакет...
+echo [INFO] Portable Python not found — downloading...
 echo ---------------------------------
 
 set "PKG_URL=https://www.nuget.org/api/v2/package/python/%PY_VERSION%"
@@ -33,7 +33,7 @@ if "%ERRORLEVEL%"=="0" (
 
 if not exist "%TMPNUP%" (
     echo ---------------------------------
-    echo [ERROR] Не удалось скачать файл %TMPNUP%
+    echo [ERROR] Failed to download file %TMPNUP%
     echo ---------------------------------
 
     pause
@@ -41,15 +41,15 @@ if not exist "%TMPNUP%" (
 )
 
 echo ---------------------------------
-echo [INFO] Переименовываю "%TMPNUP%" → "%TMPZIP%"
+echo [INFO] Renaming "%TMPNUP%" → "%TMPZIP%"
 echo ---------------------------------
 
 ren "%TMPNUP%" "python_portable_%PY_VERSION%.zip"
 if not exist "%TMPZIP%" (
-    REM возможно файл переименовался в другом месте, проверим текущую папку Temp
+    REM file might have been renamed elsewhere, check current Temp folder
 
     echo ---------------------------------
-    echo [WARN] Ожидался файл %TMPZIP% в TEMP, но его нет
+    echo [WARN] Expected file %TMPZIP% in TEMP, but it's not there
     echo ---------------------------------
 
     dir /b "%TEMP%\*.zip"
@@ -58,18 +58,18 @@ if not exist "%TMPZIP%" (
 )
 
 echo ---------------------------------
-echo [INFO] Распаковка архива %TMPZIP%
+echo [INFO] Extracting archive %TMPZIP%
 echo ---------------------------------
 
 powershell -NoProfile -Command "Expand-Archive -Path '%TMPZIP%' -DestinationPath 'python_extracted'"
 if not exist "python_extracted\tools\python.exe" (
-    echo [ERROR] tools\python.exe не найден в распакованном архиве
+    echo [ERROR] tools\python.exe not found in extracted archive
     pause
     exit /b 1
 )
 
 echo ---------------------------------
-echo [INFO] Копирую tools → %PY_ROOT%
+echo [INFO] Copying tools → %PY_ROOT%
 echo ---------------------------------
 
 xcopy /e /i /y "python_extracted\tools" "%PY_ROOT%"
@@ -78,46 +78,46 @@ del /q "%TMPZIP%"
 
 if not exist "%PY_EXE%" (
     echo ---------------------------------
-    echo [ERROR] после копирования нет %PY_EXE%
+    echo [ERROR] after copying %PY_EXE% is missing
     echo ---------------------------------
     pause
     exit /b 1
 )
 
 echo ---------------------------------
-echo [OK] Portable Python готов: %PY_EXE%
+echo [OK] Portable Python ready: %PY_EXE%
 echo ---------------------------------
 
 :venv
 if not exist "%VENV_PY%" (
     echo ---------------------------------
-    echo [INFO] Создаю venv…
+    echo [INFO] Creating venv...
     echo ---------------------------------
     "%PY_EXE%" -m venv "%VENV_DIR%"
     if errorlevel 1 (
         echo ---------------------------------
-        echo [ERROR] Не удалось создать venv
+        echo [ERROR] Failed to create venv
         echo ---------------------------------
         pause
         exit /b 1
     )
 ) else (
     echo ---------------------------------
-    echo [OK] venv уже есть
+    echo [OK] venv already exists
     echo ---------------------------------
 )
 
-echo [INFO] Обновляю pip…
+echo [INFO] Updating pip...
 "%VENV_PY%" -m pip install --upgrade pip
 
 if exist "requirements.txt" (
     echo ---------------------------------
-    echo [INFO] Устанавливаю зависимости…
+    echo [INFO] Installing dependencies...
     echo ---------------------------------
     "%VENV_PY%" -m pip install -r requirements.txt
 )
 echo ---------------------------------
-echo [RUN] Запускаю uvicorn…
+echo [RUN] Starting uvicorn...
 echo ---------------------------------
 "%VENV_PY%" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 

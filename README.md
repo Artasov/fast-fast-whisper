@@ -3,6 +3,14 @@
 A simple local OpenAI-compatible API for audio transcription based on Whisper (faster-whisper) and FastAPI.
 
 ## Quick Start
+
+```powershell
+git clone https://github.com/Artasov/fast-fast-whisper.git
+cd fast-fast-whisper
+.\start.bat
+```
+
+## Manual install
 Use **[Python 3.12.5](https://www.python.org/downloads/release/python-3125/)**
 ```bash
 
@@ -14,6 +22,8 @@ source ./venv/Scripts/activate # For Linux
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+## Usage
 
 Health check:
 
