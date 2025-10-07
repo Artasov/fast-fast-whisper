@@ -3,7 +3,7 @@
 A simple local OpenAI-compatible API for audio transcription based on Whisper (faster-whisper) and FastAPI.
 
 ## Quick Start
-Use [Python 3.12.5](https://www.python.org/downloads/release/python-3125/)
+Use **[Python 3.12.5](https://www.python.org/downloads/release/python-3125/)**
 ```bash
 
 git clone https://github.com/Artasov/fast-fast-whisper.git
