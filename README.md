@@ -1,23 +1,27 @@
 # fast-fast-whisper
 
-Локальный OpenAI‑совместимый API для транскрибирования аудио на базе Whisper (faster-whisper) и FastAPI.
+A simple local OpenAI-compatible API for audio transcription based on Whisper (faster-whisper) and FastAPI.
 
-## Быстрый старт
-
+## Quick Start
+Use [Python 3.12.5](https://www.python.org/downloads/release/python-3125/)
 ```bash
-git clone https://github.com/your-org/fast-fast-whisper.git
+
+git clone https://github.com/Artasov/fast-fast-whisper.git
 cd fast-fast-whisper
-poetry install
-poetry run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+python -m venv venv
+source ./venv/Scripts/activate # For Linux
+./venv/Scripts/activate # For Windows
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Проверка:
+Health check:
 
 ```bash
 curl http://localhost:8000/health
 ```
 
-Транскрипция (JSON):
+Transcription (JSON):
 
 ```bash
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
@@ -28,4 +32,4 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 
 ## License
 
-MIT License — см. файл [LICENSE](LICENSE).
+MIT License — see [LICENSE](LICENSE) file.
