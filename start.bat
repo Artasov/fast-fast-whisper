@@ -12,7 +12,6 @@ set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
 
 echo ---------------------------------
 echo [INFO] Start installation
-echo ---------------------------------
 
 if exist "%PY_EXE%" goto venv
 
@@ -42,7 +41,6 @@ if not exist "%TMPNUP%" (
 
 echo ---------------------------------
 echo [INFO] Renaming "%TMPNUP%" → "%TMPZIP%"
-echo ---------------------------------
 
 ren "%TMPNUP%" "python_portable_%PY_VERSION%.zip"
 if not exist "%TMPZIP%" (
@@ -59,7 +57,6 @@ if not exist "%TMPZIP%" (
 
 echo ---------------------------------
 echo [INFO] Extracting archive %TMPZIP%
-echo ---------------------------------
 
 powershell -NoProfile -Command "Expand-Archive -Path '%TMPZIP%' -DestinationPath 'python_extracted'"
 if not exist "python_extracted\tools\python.exe" (
@@ -86,7 +83,6 @@ if not exist "%PY_EXE%" (
 
 echo ---------------------------------
 echo [OK] Portable Python ready: %PY_EXE%
-echo ---------------------------------
 
 :venv
 if not exist "%VENV_PY%" (
