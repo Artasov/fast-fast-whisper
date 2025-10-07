@@ -1,43 +1,43 @@
 # AGENTS
 
-Этот мини‑проект поднимает локальный HTTP API для распознавания речи (Whisper) на базе FastAPI. Цель — совместимость по формату запросов и ответов с оригинальным OpenAI Audio API, чтобы существующие клиенты могли работать без изменений.
+This mini-project provides a local HTTP API for speech recognition (Whisper) based on FastAPI. The goal is compatibility with the original OpenAI Audio API format for requests and responses, so existing clients can work without changes.
 
-## Что реализовать
+## What to implement
 
-- Эндпоинты OpenAI Whisper:
-  - `POST /v1/audio/transcriptions` — транскрибирование.
-  - `POST /v1/audio/translations` — перевод в английский.
-  - `GET  /v1/models` — список доступных моделей (эмуляция; достаточно одной записи).
-- Поддержать форм‑поля, как у OpenAI: `file`, `model`, `prompt`, `response_format`, `temperature`, `language`.
-- Поддержать форматы ответов: `json`, `text`, `srt`, `verbose_json`, `vtt`.
-- Реализовать ленивую загрузку модели и повторное использование между запросами.
-- Конфигурацию через переменные окружения.
+- OpenAI Whisper endpoints:
+  - `POST /v1/audio/transcriptions` — transcription.
+  - `POST /v1/audio/translations` — translation to English.
+  - `GET  /v1/models` — list of available models (emulation; one entry is sufficient).
+- Support form fields like OpenAI: `file`, `model`, `prompt`, `response_format`, `temperature`, `language`.
+- Support response formats: `json`, `text`, `srt`, `verbose_json`, `vtt`.
+- Implement lazy model loading and reuse between requests.
+- Configuration through environment variables.
 
-## Технологии и зависимости
+## Technologies and dependencies
 
 - Python 3.12+
 - FastAPI + Uvicorn
-- faster-whisper (инференс)
-- python-multipart (загрузка файлов)
+- faster-whisper (inference)
+- python-multipart (file upload)
 
-## Переменные окружения
+## Environment variables
 
-- `WHISPER_MODEL` — имя/путь модели для faster-whisper (по умолчанию: `base`).
-- `WHISPER_DEVICE` — устройство: `auto`/`cpu`/`cuda` (по умолчанию: `auto`).
-- `WHISPER_COMPUTE_TYPE` — тип вычислений: `auto`/`int8`/`float16` и т.п. (по умолчанию: `auto`).
-- `WHISPER_CPU_THREADS` — потоки CPU (целое, по умолчанию пусто — авто).
-- `OPENAI_MODEL_ID` — значение поля `id` в `/v1/models` (по умолчанию: `whisper-1`).
+- `WHISPER_MODEL` — model name/path for faster-whisper (default: `base`).
+- `WHISPER_DEVICE` — device: `auto`/`cpu`/`cuda` (default: `auto`).
+- `WHISPER_COMPUTE_TYPE` — compute type: `auto`/`int8`/`float16` etc. (default: `auto`).
+- `WHISPER_CPU_THREADS` — CPU threads (integer, default empty — auto).
+- `OPENAI_MODEL_ID` — `id` field value in `/v1/models` (default: `whisper-1`).
 
-## Пример запуска
+## Example usage
 
-1. Установите зависимости (через `pip`):
-   - `pip install -e .` либо `pip install fastapi uvicorn[standard] python-multipart faster-whisper srt webvtt-py`
-2. Запустите сервер:
+1. Install dependencies (via `pip`):
+   - `pip install -e .` or `pip install fastapi uvicorn[standard] python-multipart faster-whisper srt webvtt-py`
+2. Start server:
    - `uvicorn main:app --host 0.0.0.0 --port 8000`
 
-## Примеры запросов
+## Request examples
 
-Транскрипция (JSON):
+Transcription (JSON):
 
 ```
 curl -X POST http://localhost:8000/v1/audio/transcriptions \
@@ -47,7 +47,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
   -F "response_format=json"
 ```
 
-Перевод в английский (SRT):
+Translation to English (SRT):
 
 ```
 curl -X POST http://localhost:8000/v1/audio/translations \
@@ -57,12 +57,12 @@ curl -X POST http://localhost:8000/v1/audio/translations \
   -F "response_format=srt"
 ```
 
-## Замечания по совместимости
+## Compatibility notes
 
-- Поле `model` принимается для совместимости, но фактически используется локальная модель из `WHISPER_MODEL`.
-- Для `verbose_json` возвращаются поля, совместимые по структуре, но значения некоторых метрик (например, токены, лог‑правдоподобие) не рассчитываются и заполняются нулями.
+- The `model` field is accepted for compatibility, but the local model from `WHISPER_MODEL` is actually used.
+- For `verbose_json`, fields compatible in structure are returned, but values of some metrics (e.g., tokens, log probability) are not calculated and filled with zeros.
 
-## Стиль и структура
+## Style and structure
 
-- Минимальные изменения, читаемость и простая архитектура.
-- В проекте всё сосредоточено в `main.py` для упрощения запуска.
+- Minimal changes, readability and simple architecture.
+- Everything in the project is concentrated in `main.py` for simplified startup.

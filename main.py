@@ -1,7 +1,7 @@
 import io
+import logging
 import os
 import time
-import logging
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -14,8 +14,6 @@ try:
 except Exception:  # pragma: no cover
     WhisperModel = None  # type: ignore
 
-
-
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -25,9 +23,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-logger.info("=== Fast-Fast-Whisper API запущен ===")
-print("=== Fast-Fast-Whisper API запущен ===")
-
 
 def _env(name: str, default: Optional[str] = None) -> Optional[str]:
     v = os.getenv(name)
@@ -35,24 +30,22 @@ def _env(name: str, default: Optional[str] = None) -> Optional[str]:
 
 
 def _check_cudnn_availability() -> bool:
-    """Проверяет доступность cuDNN для корректной работы с CUDA"""
+    """Check cuDNN availability for proper CUDA operation"""
     try:
         import ctranslate2
-        # Пробуем создать простую модель для проверки cuDNN
         test_model = ctranslate2.Translator("Helsinki-NLP/opus-mt-en-ru", device="cuda")
-        del test_model  # Освобождаем память
+        del test_model
         return True
     except Exception as e:
         error_msg = str(e).lower()
         if any(keyword in error_msg for keyword in ['cudnn', 'dll', 'library', 'tensor', 'descriptor']):
-            logger.warning(f"cuDNN недоступен: {e}")
+            logger.warning(f"cuDNN unavailable: {e}")
             return False
-        # Если ошибка не связана с cuDNN, считаем что cuDNN доступен
         return True
 
 
 def _check_cuda_toolkit() -> bool:
-    """Проверяет установку CUDA Toolkit"""
+    """Check CUDA Toolkit installation"""
     try:
         import subprocess
         result = subprocess.run(['nvcc', '--version'], capture_output=True, text=True, timeout=5)
@@ -62,37 +55,34 @@ def _check_cuda_toolkit() -> bool:
 
 
 def _get_cuda_diagnostic_info() -> str:
-    """Получает диагностическую информацию о CUDA"""
+    """Get CUDA diagnostic information"""
     info = []
-    
-    # Проверяем драйвер NVIDIA
+
     try:
         import subprocess
         result = subprocess.run(['nvidia-smi'], capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
-            info.append("✓ NVIDIA драйвер установлен")
+            info.append("✓ NVIDIA driver installed")
         else:
-            info.append("✗ NVIDIA драйвер не найден")
+            info.append("✗ NVIDIA driver not found")
     except Exception:
-        info.append("✗ Не удалось проверить NVIDIA драйвер")
-    
-    # Проверяем CUDA Toolkit
+        info.append("✗ Failed to check NVIDIA driver")
+
     if _check_cuda_toolkit():
-        info.append("✓ CUDA Toolkit установлен")
+        info.append("✓ CUDA Toolkit installed")
     else:
-        info.append("✗ CUDA Toolkit не установлен")
-    
-    # Проверяем ctranslate2
+        info.append("✗ CUDA Toolkit not installed")
+
     try:
         import ctranslate2
         cuda_types = ctranslate2.get_supported_compute_types('cuda')
         if cuda_types:
-            info.append(f"✓ ctranslate2 поддерживает CUDA: {cuda_types}")
+            info.append(f"✓ ctranslate2 supports CUDA: {cuda_types}")
         else:
-            info.append("✗ ctranslate2 не поддерживает CUDA")
+            info.append("✗ ctranslate2 does not support CUDA")
     except Exception as e:
-        info.append(f"✗ Ошибка ctranslate2: {e}")
-    
+        info.append(f"✗ ctranslate2 error: {e}")
+
     return "\n".join(info)
 
 
@@ -102,7 +92,7 @@ class _SimpleResponse(BaseModel):
 
 app = FastAPI(title="fast-fast-whisper", version="0.1.0")
 
-# Поддерживаемые модели Whisper
+# Supported Whisper models
 SUPPORTED_MODELS = [
     "tiny", "tiny.en",
     "base", "base.en",
@@ -113,8 +103,7 @@ SUPPORTED_MODELS = [
 
 
 def _validate_model(model_name: str) -> str:
-    """Валидация и нормализация имени модели"""
-    # Проверяем, что модель поддерживается
+    """Validate and normalize model name"""
     if model_name not in SUPPORTED_MODELS:
         raise HTTPException(
             status_code=400,
@@ -129,7 +118,7 @@ class WhisperEngine:
 
     @classmethod
     def clear_cache(cls) -> None:
-        """Очищает кэш экземпляров для перезагрузки моделей"""
+        """Clear instance cache for model reloading"""
         cls._instances.clear()
 
     def __init__(self, model_name: str, device_override: Optional[str] = None) -> None:
@@ -138,89 +127,83 @@ class WhisperEngine:
         self.compute_type = _env("WHISPER_COMPUTE_TYPE", "auto")
         self.cpu_threads = int(_env("WHISPER_CPU_THREADS", "0") or 0) or None
 
-        # Проверяем доступность CUDA и принудительно используем GPU если доступен
         if self.device == "auto":
             try:
                 import ctranslate2
                 cuda_compute_types = ctranslate2.get_supported_compute_types('cuda')
                 if cuda_compute_types:
-                    # Дополнительная проверка cuDNN перед использованием GPU
                     if _check_cudnn_availability():
                         self.device = "cuda"
-                        logger.info(f"CUDA и cuDNN доступны, принудительно переключаемся на GPU. Доступные типы вычислений: {cuda_compute_types}")
+                        logger.info(
+                            f"CUDA and cuDNN available, switching to GPU. Available compute types: {cuda_compute_types}")
                     else:
                         self.device = "cpu"
-                        logger.warning("CUDA доступна, но cuDNN недоступен, используем CPU")
-                        logger.warning("Для использования GPU установите CUDA Toolkit и cuDNN:")
-                        logger.warning("1. Скачайте CUDA Toolkit с https://developer.nvidia.com/cuda-downloads")
-                        logger.warning("2. Скачайте cuDNN с https://developer.nvidia.com/cudnn")
-                        logger.warning("3. Добавьте пути к библиотекам в переменную PATH")
+                        logger.warning("CUDA available but cuDNN unavailable, using CPU")
+                        logger.warning("To use GPU install CUDA Toolkit and cuDNN:")
+                        logger.warning("1. Download CUDA Toolkit from https://developer.nvidia.com/cuda-downloads")
+                        logger.warning("2. Download cuDNN from https://developer.nvidia.com/cudnn")
+                        logger.warning("3. Add library paths to PATH variable")
                 else:
                     self.device = "cpu"
-                    logger.info("CUDA недоступна, используем CPU")
+                    logger.info("CUDA unavailable, using CPU")
             except Exception as e:
-                logger.warning(f"Не удалось проверить доступность CUDA: {e}")
+                logger.warning(f"Failed to check CUDA availability: {e}")
                 self.device = "cpu"
         elif self.device == "cuda":
-            # Если явно запрошен CUDA, проверяем его доступность
             try:
                 import ctranslate2
                 cuda_compute_types = ctranslate2.get_supported_compute_types('cuda')
                 if not cuda_compute_types:
-                    logger.warning("CUDA недоступна, но запрошена. Переключаемся на CPU")
+                    logger.warning("CUDA unavailable but requested. Switching to CPU")
                     self.device = "cpu"
                 elif not _check_cudnn_availability():
-                    logger.warning("cuDNN недоступен, но запрошен CUDA. Переключаемся на CPU")
+                    logger.warning("cuDNN unavailable but CUDA requested. Switching to CPU")
                     self.device = "cpu"
             except Exception as e:
-                logger.warning(f"Ошибка при проверке CUDA: {e}. Переключаемся на CPU")
+                logger.warning(f"Error checking CUDA: {e}. Switching to CPU")
                 self.device = "cpu"
-        
-        # Дополнительная проверка: если установлена переменная FORCE_CPU, принудительно используем CPU
+
         if _env("FORCE_CPU", "").lower() in ("true", "1", "yes"):
             self.device = "cpu"
-            logger.info("Принудительное использование CPU (FORCE_CPU=true)")
+            logger.info("Forced CPU usage (FORCE_CPU=true)")
 
-        # Нормализуем compute_type для ctranslate2
         if self.compute_type == "auto":
             if self.device == "cuda":
-                self.compute_type = "float16"  # Оптимальный тип для GPU
+                self.compute_type = "float16"
             else:
-                self.compute_type = "float32"  # Оптимальный тип для CPU
+                self.compute_type = "float32"
 
-        logger.info(f"Инициализация модели {model_name} с параметрами: device={self.device}, compute_type={self.compute_type}")
+        logger.info(
+            f"Initializing model {model_name} with parameters: device={self.device}, compute_type={self.compute_type}")
 
         if WhisperModel is None:
             raise RuntimeError(
                 "faster-whisper is not installed. Ensure dependencies are installed."
             )
 
-        # Создаем папку models в корне проекта если её нет
         models_dir = Path("models")
         models_dir.mkdir(exist_ok=True)
 
-        # Используем локальную папку models для загрузки моделей
         try:
-            logger.info(f"Загружаем модель {model_name} на устройство {self.device}")
+            logger.info(f"Loading model {model_name} on device {self.device}")
             self._model = WhisperModel(
                 model_size_or_path=self.model_name,
                 device=self.device,
                 compute_type=self.compute_type,
                 download_root=str(models_dir.absolute()),
             )
-            logger.info(f"Модель {model_name} успешно загружена на {self.device}")
+            logger.info(f"Model {model_name} successfully loaded on {self.device}")
         except Exception as e:
-            # Проверяем, является ли ошибка связанной с cuDNN/CUDA
             error_msg = str(e).lower()
             is_cudnn_error = any(keyword in error_msg for keyword in [
                 'cudnn', 'cuda', 'gpu', 'tensor', 'descriptor', 'dll', 'library'
             ])
-            
+
             if is_cudnn_error and self.device == "cuda":
-                logger.error(f"Ошибка CUDA/cuDNN: {e}")
-                logger.error("Диагностическая информация:")
+                logger.error(f"CUDA/cuDNN error: {e}")
+                logger.error("Diagnostic information:")
                 logger.error(_get_cuda_diagnostic_info())
-                logger.info("Переключаемся на CPU из-за проблем с CUDA/cuDNN...")
+                logger.info("Switching to CPU due to CUDA/cuDNN issues...")
                 try:
                     self.device = "cpu"
                     self.compute_type = "float32"
@@ -230,27 +213,25 @@ class WhisperEngine:
                         compute_type=self.compute_type,
                         download_root=str(models_dir.absolute()),
                     )
-                    logger.info(f"Модель {model_name} успешно загружена на CPU после ошибки CUDA")
+                    logger.info(f"Model {model_name} successfully loaded on CPU after CUDA error")
                 except Exception as e3:
-                    logger.error(f"Не удалось загрузить модель даже на CPU: {e3}")
+                    logger.error(f"Failed to load model even on CPU: {e3}")
                     raise
             else:
-                # Если не ошибка CUDA, пробуем с минимальными параметрами
-                logger.warning(f"Не удалось инициализировать с полными параметрами: {e}")
-                logger.info("Пробуем с минимальными параметрами...")
+                logger.warning(f"Failed to initialize with full parameters: {e}")
+                logger.info("Trying with minimal parameters...")
                 try:
                     self._model = WhisperModel(
                         model_size_or_path=self.model_name,
                         download_root=str(models_dir.absolute()),
                     )
-                    logger.info(f"Модель {model_name} загружена с минимальными параметрами")
+                    logger.info(f"Model {model_name} loaded with minimal parameters")
                 except Exception as e2:
-                    logger.error(f"Критическая ошибка при загрузке модели: {e2}")
+                    logger.error(f"Critical error loading model: {e2}")
                     raise
 
     @classmethod
     def get(cls, model_name: str, device_override: Optional[str] = None) -> "WhisperEngine":
-        # Создаем уникальный ключ для кэша, включая устройство
         cache_key = f"{model_name}_{device_override or 'auto'}"
         if cache_key not in cls._instances:
             cls._instances[cache_key] = WhisperEngine(model_name, device_override)
@@ -265,18 +246,15 @@ class WhisperEngine:
             prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         started = time.time()
-        
-        # Логируем параметры запроса
-        logger.info(f"Начинаем распознавание: device={self.device}, compute_type={self.compute_type}, "
-                   f"language={language}, temperature={temperature}, translate={translate}, prompt={'установлен' if prompt else 'не установлен'}")
 
-        # Подготавливаем параметры для faster-whisper
+        logger.info(f"Starting recognition: device={self.device}, compute_type={self.compute_type}, "
+                    f"language={language}, temperature={temperature}, translate={translate}, prompt={'set' if prompt else 'not set'}")
+
         transcribe_kwargs = {
             "audio": file_like,
             "task": "translate" if translate else "transcribe",
         }
 
-        # Добавляем параметры только если они не None
         if language is not None:
             transcribe_kwargs["language"] = language
         if temperature is not None:
@@ -284,15 +262,15 @@ class WhisperEngine:
         if prompt is not None:
             transcribe_kwargs["initial_prompt"] = prompt
 
-        logger.info(f"Параметры распознавания: {transcribe_kwargs}")
+        logger.info(f"Recognition parameters: {transcribe_kwargs}")
 
         try:
             segments_obj, info = self._model.transcribe(**transcribe_kwargs)
             processing_time = time.time() - started
-            logger.info(f"Распознавание завершено за {processing_time:.2f} секунд")
+            logger.info(f"Recognition completed in {processing_time:.2f} seconds")
         except Exception as e:
-            logger.error(f"Ошибка во время распознавания: {e}")
-            logger.error(f"Параметры распознавания: {transcribe_kwargs}")
+            logger.error(f"Error during recognition: {e}")
+            logger.error(f"Recognition parameters: {transcribe_kwargs}")
             raise
 
         text_parts: List[str] = []
@@ -317,10 +295,9 @@ class WhisperEngine:
         result_text = ("".join(text_parts)).strip()
         result_duration = float(getattr(info, "duration", time.time() - started) or 0.0)
         detected_language = getattr(info, "language", None)
-        
-        # Логируем результат
-        logger.info(f"Результат распознавания: язык={detected_language}, длительность={result_duration:.2f}с, "
-                   f"сегментов={len(segments)}, текст='{result_text[:100]}{'...' if len(result_text) > 100 else ''}'")
+
+        logger.info(f"Recognition result: language={detected_language}, duration={result_duration:.2f}s, "
+                    f"segments={len(segments)}, text='{result_text[:100]}{'...' if len(result_text) > 100 else ''}'")
 
         return {
             "language": detected_language,
@@ -360,10 +337,10 @@ async def _handle_transcription(
         device: Optional[str],
         translate: bool,
 ):
-    logger.info(f"Получен запрос на {'перевод' if translate else 'транскрипцию'}: "
-               f"модель={model}, формат={response_format}, язык={language}, "
-               f"температура={temperature}, устройство={device}, файл={file.filename}, размер={file.size if hasattr(file, 'size') else 'неизвестен'}")
-    
+    logger.info(f"Received request for {'translation' if translate else 'transcription'}: "
+                f"model={model}, format={response_format}, language={language}, "
+                f"temperature={temperature}, device={device}, file={file.filename}, size={file.size if hasattr(file, 'size') else 'unknown'}")
+
     _validate_file(file)
     model_name = _validate_model(model)
     if device is not None:
@@ -390,8 +367,8 @@ async def _handle_transcription(
     text = result["text"]
     segments = result["segments"]
 
-    logger.info(f"Обработка завершена: результат содержит {len(segments)} сегментов, "
-               f"общая длина текста: {len(text)} символов")
+    logger.info(f"Processing completed: result contains {len(segments)} segments, "
+                f"total text length: {len(text)} characters")
 
     fmt = (response_format or "json").lower()
     if fmt == "json":
@@ -431,4 +408,3 @@ def health() -> Dict[str, str]:
         return {"status": "ok"}
     except Exception as e:  # pragma: no cover
         raise HTTPException(status_code=500, detail=str(e))
-
