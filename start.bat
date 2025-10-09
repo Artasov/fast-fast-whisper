@@ -13,6 +13,9 @@ set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
 echo ---------------------------------
 echo [INFO] Start installation
 
+echo [INFO] Enabling PowerShell user scripts (RemoteSigned) for CurrentUser...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force" >nul 2>nul
+
 if exist "%PY_EXE%" goto venv
 
 echo ---------------------------------
