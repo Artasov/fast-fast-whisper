@@ -33,14 +33,14 @@ This mini-project provides a local HTTP API for speech recognition (Whisper) bas
 1. Install dependencies (via `pip`):
    - `pip install -e .` or `pip install fastapi uvicorn[standard] python-multipart faster-whisper srt webvtt-py`
 2. Start server:
-   - `uvicorn main:app --host 0.0.0.0 --port 8000`
+   - `uvicorn main:app --host 0.0.0.0 --port 8868`
 
 ## Request examples
 
 Transcription (JSON):
 
 ```
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
+curl -X POST http://localhost:8868/v1/audio/transcriptions \
   -H "Content-Type: multipart/form-data" \
   -F "model=whisper-1" \
   -F "file=@sample.mp3" \
@@ -50,7 +50,7 @@ curl -X POST http://localhost:8000/v1/audio/transcriptions \
 Translation to English (SRT):
 
 ```
-curl -X POST http://localhost:8000/v1/audio/translations \
+curl -X POST http://localhost:8868/v1/audio/translations \
   -H "Content-Type: multipart/form-data" \
   -F "model=whisper-1" \
   -F "file=@sample.mp3" \

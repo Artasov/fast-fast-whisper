@@ -4,15 +4,24 @@ A simple local OpenAI-compatible API for audio transcription based on Whisper (f
 
 ## Quick Start
 
-### In `powershell`:
+### Windows (PowerShell)
 
 ```sh
 cd C:\ # or any other directory
 git clone https://github.com/Artasov/fast-fast-whisper.git
 cd fast-fast-whisper
 .\start.bat
-
 ```
+
+### Linux / macOS
+
+```sh
+git clone https://github.com/Artasov/fast-fast-whisper.git
+cd fast-fast-whisper
+./start-unix.sh
+```
+
+All helper scripts run the API on port `8868`. To override, set the environment variable `FAST_FAST_WHISPER_PORT` (or `PORT`) before launching the script.
 
 ## Manual install
 
@@ -25,16 +34,16 @@ python -m venv venv
 ```
 
 ```sh
-source ./venv/Scripts/activate # For Linux
+source ./venv/bin/activate # For Linux / macOS
 ```
 
 ```sh
-./venv/Scripts/activate # For Windows
+.\venv\Scripts\Activate.ps1 # For Windows (PowerShell)
 ```
 
 ```sh
 pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --host 0.0.0.0 --port 8868 --reload
 ```
 
 ## Usage
@@ -42,13 +51,13 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 Health check:
 
 ```sh
-curl http://localhost:8000/health
+curl http://localhost:8868/health
 ```
 
 Transcription (JSON):
 
 ```sh
-curl -X POST http://localhost:8000/v1/audio/transcriptions \
+curl -X POST http://localhost:8868/v1/audio/transcriptions \
   -F "model=base" \
   -F "file=@sample.mp3" \
   -F "response_format=json"

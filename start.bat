@@ -9,6 +9,11 @@ set "PY_ROOT=python_portable"
 set "PY_EXE=%PY_ROOT%\python.exe"
 set "VENV_DIR=.venv"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+set "DEFAULT_PORT=8868"
+set "APP_PORT="
+if defined FAST_FAST_WHISPER_PORT set "APP_PORT=%FAST_FAST_WHISPER_PORT%"
+if not defined APP_PORT if defined PORT set "APP_PORT=%PORT%"
+if not defined APP_PORT set "APP_PORT=%DEFAULT_PORT%"
 
 echo ---------------------------------
 echo [INFO] Start installation
@@ -116,8 +121,8 @@ if exist "requirements.txt" (
     "%VENV_PY%" -m pip install -r requirements.txt
 )
 echo ---------------------------------
-echo [RUN] Starting uvicorn...
+echo [RUN] Starting uvicorn on port %APP_PORT% (set FAST_FAST_WHISPER_PORT or PORT to override)
 echo ---------------------------------
-"%VENV_PY%" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+"%VENV_PY%" -m uvicorn main:app --host 0.0.0.0 --port %APP_PORT% --reload
 
 exit /b %ERRORLEVEL%
