@@ -28,6 +28,7 @@ cd fast-fast-whisper
 Stop the server with `./stop-unix.sh` when you're done.
 
 All helper scripts run the API on port `8868`. To override, set the environment variable `FAST_FAST_WHISPER_PORT` (or `PORT`) before launching the script. The start scripts detach the server from the console and stream logs to `fast-fast-whisper.log`.
+To tweak logging (e.g., format or destination), edit `logging.ini` — both helper scripts pass it to Uvicorn via `--log-config`.
 
 ## Manual install
 
@@ -49,7 +50,7 @@ source ./venv/bin/activate # For Linux / macOS
 
 ```sh
 pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8868 --reload
+uvicorn main:app --host 0.0.0.0 --port 8868 --log-config logging.ini --reload
 ```
 
 ## Usage

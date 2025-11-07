@@ -18,8 +18,8 @@ if not defined APP_PORT if defined PORT set "APP_PORT=%PORT%"
 if not defined APP_PORT set "APP_PORT=%DEFAULT_PORT%"
 set "PID_FILE=%PROJECT_DIR%\.fast-fast-whisper.pid"
 set "LOG_FILE=%PROJECT_DIR%\fast-fast-whisper.log"
+set "LOG_CONFIG=%PROJECT_DIR%\logging.ini"
 set "PAUSE_SECONDS=5"
-set "PS_CAPTURE=%TEMP%\ffw_start_ps.out"
 set "EXIT_CODE=0"
 
 call :check_existing_instance
@@ -145,30 +145,26 @@ echo ---------------------------------
 
 
 powershell -NoProfile -Command "New-Item -Path '%LOG_FILE%' -ItemType File -Force | Out-Null" >nul 2>&1
-if exist "%PS_CAPTURE%" del "%PS_CAPTURE%" >nul 2>&1
 
-powershell -NoProfile -Command "$ErrorActionPreference = 'Stop'; $log = Join-Path (Resolve-Path .) '%LOG_FILE%'; $pwd = Resolve-Path .; $python = '%VENV_PY%'; $pidFile = '%PID_FILE%'; $args = @('-m','uvicorn','main:app','--host','0.0.0.0','--port','%APP_PORT%'); $cmdLine = '"' + $python + '" ' + ($args -join ' '); $full = '/c \"' + $cmdLine + ' >> \"' + $log + '\" 2>&1\"'; $p = Start-Process -FilePath 'cmd.exe' -ArgumentList $full -WorkingDirectory $pwd -WindowStyle Hidden -PassThru; Set-Content -Path $pidFile -Value ($p.Id.ToString()) -Encoding ascii; $p.Id" >"%PS_CAPTURE%" 2>&1
-
-set "SERVER_PID="
-if exist "%PS_CAPTURE%" (
-    for /f "usebackq delims=" %%P in ("%PS_CAPTURE%") do (
-        set "SERVER_PID=%%P"
-        goto :after_pid_read
-    )
-)
-:after_pid_read
-
-if not defined SERVER_PID (
+powershell -NoProfile -Command "$ErrorActionPreference='Stop'; $pwd=Resolve-Path .; $python='%VENV_PY%'; $pidFile='%PID_FILE%'; $logFile='%LOG_FILE%'; $logConfig='%LOG_CONFIG%'; $uvicorn='"' + $python + '" -m uvicorn main:app --host 0.0.0.0 --port %APP_PORT% --log-config "' + $logConfig + '"'; $cmd='/c "' + $uvicorn + ' >> "' + $logFile + '" 2>&1"'; $proc=Start-Process -FilePath 'cmd.exe' -ArgumentList $cmd -WorkingDirectory $pwd -WindowStyle Hidden -PassThru; if(-not $proc){ throw 'Failed to start uvicorn process'; } Set-Content -Path $pidFile -Value ($proc.Id.ToString()) -Encoding ascii"
+if errorlevel 1 (
     echo ---------------------------------
-    echo [ERROR] Failed to start uvicorn in background (no PID returned)
+    echo [ERROR] PowerShell failed to launch uvicorn (see message above)
     echo ---------------------------------
-    if exist "%PS_CAPTURE%" type "%PS_CAPTURE%"
-    del "%PS_CAPTURE%" >nul 2>&1
     set "EXIT_CODE=1"
     goto final_exit
 )
 
-del "%PS_CAPTURE%" >nul 2>&1
+set "SERVER_PID="
+set /p SERVER_PID=<"%PID_FILE%"
+
+if not defined SERVER_PID (
+    echo ---------------------------------
+    echo [ERROR] PID file is empty (%PID_FILE%)
+    echo ---------------------------------
+    set "EXIT_CODE=1"
+    goto final_exit
+)
 
 if exist "%PID_FILE%" (
     echo [INFO] PID file written: %PID_FILE% (PID !SERVER_PID!)
@@ -230,7 +226,6 @@ exit /b 0
 
 :final_exit
 if "%EXIT_CODE%"=="" set "EXIT_CODE=0"
-if exist "%PS_CAPTURE%" del "%PS_CAPTURE%" >nul 2>&1
 if defined PAUSE_SECONDS (
     echo ---------------------------------
     echo [INFO] Closing window in %PAUSE_SECONDS%s...

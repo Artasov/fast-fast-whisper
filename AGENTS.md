@@ -35,7 +35,7 @@ This mini-project provides a local HTTP API for speech recognition (Whisper) bas
 1. Install dependencies (via `pip`):
    - `pip install -e .` or `pip install fastapi uvicorn[standard] python-multipart faster-whisper srt webvtt-py`
 2. Start server:
-   - `uvicorn main:app --host 0.0.0.0 --port 8868`
+   - `uvicorn main:app --host 0.0.0.0 --port 8868 --log-config logging.ini`
    - or `./start-unix.sh` / `.\start.bat` to run it as a background service (logs → `fast-fast-whisper.log`, stop with `./stop-unix.sh` / `.\stop.bat`)
    - `start.bat` maintains its own virtual environment folder `.venv-win` so it doesn't clash with Unix setups.
 
