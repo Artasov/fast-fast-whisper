@@ -11,6 +11,8 @@ VENV_DIR=".venv"
 VENV_PY="$VENV_DIR/bin/python"
 DEFAULT_PORT=8868
 PORT="${FAST_FAST_WHISPER_PORT:-${PORT:-$DEFAULT_PORT}}"
+PID_FILE=".fast-fast-whisper.pid"
+LOG_FILE="fast-fast-whisper.log"
 
 log() {
     printf '[INFO] %s\n' "$1"
@@ -79,12 +81,68 @@ install_dependencies() {
     fi
 }
 
+pid_is_running() {
+    local pid="$1"
+    if [ -z "$pid" ]; then
+        return 1
+    fi
+    if kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+ensure_not_running() {
+    if [ ! -f "$PID_FILE" ]; then
+        return
+    fi
+
+    local existing_pid
+    existing_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if pid_is_running "$existing_pid"; then
+        log_error "Server already running with PID $existing_pid. Use ./stop-unix.sh to stop it first."
+        exit 1
+    fi
+
+    log "Removing stale PID file ($PID_FILE)"
+    rm -f "$PID_FILE"
+}
+
 run_server() {
-    log "Starting uvicorn on 0.0.0.0:$PORT (set FAST_FAST_WHISPER_PORT or PORT to override)"
-    exec "$VENV_PY" -m uvicorn main:app --host 0.0.0.0 --port "$PORT" --reload
+    log "Starting uvicorn on 0.0.0.0:$PORT in background (logs: $LOG_FILE)"
+    log "Override port via FAST_FAST_WHISPER_PORT or PORT environment variables"
+
+    : >"$LOG_FILE"
+
+    local cmd=("$VENV_PY" -m uvicorn main:app --host 0.0.0.0 --port "$PORT")
+
+    # shellcheck disable=SC2086
+    nohup "${cmd[@]}" >>"$LOG_FILE" 2>&1 &
+    local pid=$!
+
+    if [ -z "$pid" ]; then
+        log_error "Failed to start uvicorn"
+        exit 1
+    fi
+
+    printf '%s' "$pid" >"$PID_FILE"
+
+    sleep 1
+    if ! pid_is_running "$pid"; then
+        log_error "Process $pid exited immediately. See $LOG_FILE for details."
+        rm -f "$PID_FILE"
+        if [ -f "$LOG_FILE" ]; then
+            log "Last 40 log lines:"
+            tail -n 40 "$LOG_FILE"
+        fi
+        exit 1
+    fi
+
+    log "Server started with PID $pid. Use ./stop-unix.sh to stop it."
 }
 
 ensure_python
+ensure_not_running
 create_venv
 install_dependencies
 run_server

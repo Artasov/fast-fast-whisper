@@ -1,5 +1,7 @@
 # AGENTS
 
+Отвечай всегда на русском я не знаю других языков.
+
 This mini-project provides a local HTTP API for speech recognition (Whisper) based on FastAPI. The goal is compatibility with the original OpenAI Audio API format for requests and responses, so existing clients can work without changes.
 
 ## What to implement
@@ -34,6 +36,8 @@ This mini-project provides a local HTTP API for speech recognition (Whisper) bas
    - `pip install -e .` or `pip install fastapi uvicorn[standard] python-multipart faster-whisper srt webvtt-py`
 2. Start server:
    - `uvicorn main:app --host 0.0.0.0 --port 8868`
+   - or `./start-unix.sh` / `.\start.bat` to run it as a background service (logs → `fast-fast-whisper.log`, stop with `./stop-unix.sh` / `.\stop.bat`)
+   - `start.bat` maintains its own virtual environment folder `.venv-win` so it doesn't clash with Unix setups.
 
 ## Request examples
 

@@ -13,6 +13,10 @@ cd fast-fast-whisper
 .\start.bat
 ```
 
+The helper stores Windows-specific dependencies in `.venv-win` to avoid conflicts with Unix environments.
+
+To stop the background server later, run `.\stop.bat` from the project directory.
+
 ### Linux / macOS
 
 ```sh
@@ -21,7 +25,9 @@ cd fast-fast-whisper
 ./start-unix.sh
 ```
 
-All helper scripts run the API on port `8868`. To override, set the environment variable `FAST_FAST_WHISPER_PORT` (or `PORT`) before launching the script.
+Stop the server with `./stop-unix.sh` when you're done.
+
+All helper scripts run the API on port `8868`. To override, set the environment variable `FAST_FAST_WHISPER_PORT` (or `PORT`) before launching the script. The start scripts detach the server from the console and stream logs to `fast-fast-whisper.log`.
 
 ## Manual install
 

@@ -122,6 +122,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv-win/
 env/
 venv/
 ENV/
@@ -266,3 +267,4 @@ dist
 tmp/
 temp/
 test_recognize
+python_portable
