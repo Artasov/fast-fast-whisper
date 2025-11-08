@@ -1,3 +1,4 @@
+import asyncio
 import io
 import logging
 import os
@@ -353,10 +354,11 @@ async def _handle_transcription(
         if device == 'gpu':
             device = 'cuda'
 
-    engine = WhisperEngine.get(model_name, device_override=device)
+    engine = await asyncio.to_thread(WhisperEngine.get, model_name, device_override=device)
     audio = await _read_upload_to_memory(file)
 
-    result = engine.transcribe(
+    result = await asyncio.to_thread(
+        engine.transcribe,
         file_like=audio,
         language=language,
         temperature=temperature,
