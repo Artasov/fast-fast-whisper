@@ -13,8 +13,6 @@ cd fast-fast-whisper
 .\start.bat
 ```
 
-The helper stores Windows-specific dependencies in `.venv-win` to avoid conflicts with Unix environments.
-
 To stop the background server later, run `.\stop.bat` from the project directory.
 
 ### Linux / macOS
