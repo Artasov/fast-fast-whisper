@@ -18,7 +18,6 @@ if not defined APP_PORT if defined PORT set "APP_PORT=%PORT%"
 if not defined APP_PORT set "APP_PORT=%DEFAULT_PORT%"
 set "PID_FILE=%PROJECT_DIR%\.fast-fast-whisper.pid"
 set "LOG_FILE=%PROJECT_DIR%\fast-fast-whisper.log"
-set "LOG_CONFIG=%PROJECT_DIR%\logging.ini"
 set "PAUSE_SECONDS=5"
 set "EXIT_CODE=0"
 
@@ -146,17 +145,25 @@ echo ---------------------------------
 
 powershell -NoProfile -Command "New-Item -Path '%LOG_FILE%' -ItemType File -Force | Out-Null" >nul 2>&1
 
-powershell -NoProfile -Command "$ErrorActionPreference='Stop'; $pwd=Resolve-Path .; $python='%VENV_PY%'; $pidFile='%PID_FILE%'; $logFile='%LOG_FILE%'; $logConfig='%LOG_CONFIG%'; $uvicorn='"' + $python + '" -m uvicorn main:app --host 0.0.0.0 --port %APP_PORT% --log-config "' + $logConfig + '"'; $cmd='/c "' + $uvicorn + ' >> "' + $logFile + '" 2>&1"'; $proc=Start-Process -FilePath 'cmd.exe' -ArgumentList $cmd -WorkingDirectory $pwd -WindowStyle Hidden -PassThru; if(-not $proc){ throw 'Failed to start uvicorn process'; } Set-Content -Path $pidFile -Value ($proc.Id.ToString()) -Encoding ascii"
+powershell -NoProfile -Command "$ErrorActionPreference='Stop'; $pwd=Resolve-Path .; $python='%VENV_PY%'; $pidFile='%PID_FILE%'; $logFile='%LOG_FILE%'; $cmd='"' + $python + '" -m uvicorn main:app --host 0.0.0.0 --port %APP_PORT% --no-use-colors >> "' + $logFile + '" 2>&1'; $proc=Start-Process -FilePath 'cmd.exe' -ArgumentList '/c',$cmd -WorkingDirectory $pwd -WindowStyle Hidden -PassThru; if(-not $proc){ throw 'Failed to start uvicorn process'; } Set-Content -Path $pidFile -Value ($proc.Id.ToString()) -Encoding ascii"
 if errorlevel 1 (
     echo ---------------------------------
-    echo [ERROR] PowerShell failed to launch uvicorn (see message above)
+    echo [ERROR] Failed to start uvicorn (see message above)
     echo ---------------------------------
     set "EXIT_CODE=1"
     goto final_exit
 )
 
 set "SERVER_PID="
-set /p SERVER_PID=<"%PID_FILE%"
+if exist "%PID_FILE%" (
+    set /p SERVER_PID=<"%PID_FILE%"
+) else (
+    echo ---------------------------------
+    echo [ERROR] Failed to create PID file (%PID_FILE%)
+    echo ---------------------------------
+    set "EXIT_CODE=1"
+    goto final_exit
+)
 
 if not defined SERVER_PID (
     echo ---------------------------------
@@ -166,21 +173,7 @@ if not defined SERVER_PID (
     goto final_exit
 )
 
-if exist "%PID_FILE%" (
-    echo [INFO] PID file written: %PID_FILE% (PID !SERVER_PID!)
-) else (
-    echo ---------------------------------
-    echo [ERROR] Failed to write PID file at %PID_FILE%
-    echo [DEBUG] Current directory is:
-    cd
-    echo [DEBUG] Retrying with PowerShell...
-    powershell -NoProfile -Command "[IO.File]::WriteAllText('%PID_FILE%', '!SERVER_PID!'.Trim())"
-    if exist "%PID_FILE%" (
-        echo [INFO] PID file created by PowerShell fallback.
-    ) else (
-        echo [ERROR] PowerShell fallback also failed.
-    )
-)
+echo [INFO] PID file ready: %PID_FILE% (PID !SERVER_PID!)
 
 powershell -NoProfile -Command "Start-Sleep -Seconds 1; if (Get-Process -Id !SERVER_PID! -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >nul 2>&1
 if errorlevel 1 (

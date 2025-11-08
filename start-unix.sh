@@ -13,7 +13,6 @@ DEFAULT_PORT=8868
 PORT="${FAST_FAST_WHISPER_PORT:-${PORT:-$DEFAULT_PORT}}"
 PID_FILE=".fast-fast-whisper.pid"
 LOG_FILE="fast-fast-whisper.log"
-LOG_CONFIG="$PROJECT_ROOT/logging.ini"
 
 log() {
     printf '[INFO] %s\n' "$1"
@@ -115,7 +114,7 @@ run_server() {
 
     : >"$LOG_FILE"
 
-    local cmd=("$VENV_PY" -m uvicorn main:app --host 0.0.0.0 --port "$PORT" --log-config "$LOG_CONFIG")
+    local cmd=("$VENV_PY" -m uvicorn main:app --host 0.0.0.0 --port "$PORT" --no-use-colors)
 
     # shellcheck disable=SC2086
     nohup "${cmd[@]}" >>"$LOG_FILE" 2>&1 &
