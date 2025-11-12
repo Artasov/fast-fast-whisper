@@ -67,6 +67,18 @@ curl -X POST http://localhost:8868/v1/audio/transcriptions \
   -F "response_format=json"
 ```
 
+### Дополнительные поля формы
+
+Эндпоинт `/v1/audio/transcriptions` полностью повторяет форму OpenAI и принимает поля `file`, `model`, `prompt`, `response_format`, `temperature`, `language`, `device`. Поле `prompt` передаётся в Whisper как `initial_prompt`, поэтому с его помощью можно подсказать модели специфичные термины или формат.
+
+```sh
+curl -X POST http://localhost:8868/v1/audio/transcriptions \
+  -F "model=base" \
+  -F "file=@sample.mp3" \
+  -F "prompt=Используй термины Python и REST API" \
+  -F "response_format=json"
+```
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) file.
