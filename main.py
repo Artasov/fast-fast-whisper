@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -92,7 +93,13 @@ class _SimpleResponse(BaseModel):
 
 
 app = FastAPI(title="fast-fast-whisper", version="0.1.0")
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 # Supported Whisper models
 SUPPORTED_MODELS = [
     "tiny", "tiny.en",
