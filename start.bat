@@ -63,15 +63,24 @@ if not exist "%TMPNUP%" (
 echo ---------------------------------
 echo [INFO] Renaming "%TMPNUP%" → "%TMPZIP%"
 
-ren "%TMPNUP%" "python_portable_%PY_VERSION%.zip"
+if exist "%TMPZIP%" (
+    echo [INFO] Removing leftover %TMPZIP%
+    del /f /q "%TMPZIP%"
+)
+
+ren "%TMPNUP%" "python_portable_%PY_VERSION%.zip" >nul 2>nul
+if not exist "%TMPZIP%" if exist "%TMPNUP%" (
+    echo [WARN] Rename failed, copying file instead
+    copy /y "%TMPNUP%" "%TMPZIP%" >nul 2>nul
+    del /f /q "%TMPNUP%" >nul 2>nul
+)
 if not exist "%TMPZIP%" (
     REM file might have been renamed elsewhere, check current Temp folder
 
     echo ---------------------------------
-    echo [WARN] Expected file %TMPZIP% in TEMP, but it's not there
+    echo [ERROR] Expected file %TMPZIP% in TEMP, but it's not there
     echo ---------------------------------
 
-    dir /b "%TEMP%\*.zip"
     pause
     set "EXIT_CODE=1"
     goto final_exit
@@ -79,6 +88,8 @@ if not exist "%TMPZIP%" (
 
 echo ---------------------------------
 echo [INFO] Extracting archive %TMPZIP%
+
+if exist "python_extracted" rd /s /q "python_extracted"
 
 powershell -NoProfile -Command "Expand-Archive -Path '%TMPZIP%' -DestinationPath 'python_extracted'"
 if not exist "python_extracted\tools\python.exe" (
