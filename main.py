@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import io
 import logging
 import os
@@ -92,6 +93,14 @@ class _SimpleResponse(BaseModel):
     text: str
 
 
+class _ModelActionRequest(BaseModel):
+    model: str
+
+
+class _WarmupRequest(_ModelActionRequest):
+    device: Optional[str] = None
+
+
 app = FastAPI(title="fast-fast-whisper", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
@@ -119,6 +128,22 @@ def _validate_model(model_name: str) -> str:
         )
 
     return model_name
+
+
+def _normalize_device(device: Optional[str]) -> Optional[str]:
+    """Normalize user-provided device names"""
+    if device is None:
+        return None
+
+    normalized = device.lower().strip()
+    if normalized not in ['cpu', 'cuda', 'gpu', 'auto']:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid device: {device}. Supported devices: cpu, cuda, gpu, auto"
+        )
+    if normalized == 'gpu':
+        normalized = 'cuda'
+    return normalized
 
 
 class WhisperEngine:
@@ -335,6 +360,40 @@ async def _read_upload_to_memory(upload: UploadFile) -> io.BytesIO:
     return io.BytesIO(data)
 
 
+def _download_model_files(model_name: str) -> Dict[str, Any]:
+    if WhisperModel is None:
+        raise RuntimeError("faster-whisper is not installed")
+
+    models_dir = Path("models")
+    models_dir.mkdir(exist_ok=True)
+
+    model_dir = models_dir / model_name
+    existed_before = model_dir.exists()
+    started = time.time()
+    downloader = None
+
+    try:
+        downloader = WhisperModel(
+            model_size_or_path=model_name,
+            device="cpu",
+            compute_type="float32",
+            download_root=str(models_dir.absolute()),
+        )
+        logger.info(f"Model {model_name} downloaded into {model_dir}")
+    finally:
+        if downloader is not None:
+            del downloader
+            gc.collect()
+
+    return {
+        "model": model_name,
+        "download_root": str(models_dir.absolute()),
+        "model_path": str(model_dir),
+        "existed_before": existed_before,
+        "elapsed": time.time() - started,
+    }
+
+
 async def _handle_transcription(
         file: UploadFile,
         model: str,
@@ -351,15 +410,7 @@ async def _handle_transcription(
 
     _validate_file(file)
     model_name = _validate_model(model)
-    if device is not None:
-        device = device.lower().strip()
-        if device not in ['cpu', 'cuda', 'gpu', 'auto']:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid device: {device}. Supported devices: cpu, cuda, gpu, auto"
-            )
-        if device == 'gpu':
-            device = 'cuda'
+    device = _normalize_device(device)
 
     engine = await asyncio.to_thread(WhisperEngine.get, model_name, device_override=device)
     audio = await _read_upload_to_memory(file)
@@ -386,6 +437,51 @@ async def _handle_transcription(
         return PlainTextResponse(content=text, media_type="text/plain; charset=utf-8")
 
     raise HTTPException(status_code=400, detail=f"Unsupported response_format: {response_format}. Use json or text")
+
+
+@app.post("/v1/models/download")
+async def download_model_endpoint(payload: _ModelActionRequest):
+    model_name = _validate_model(payload.model)
+    logger.info(f"Received request to download model {model_name}")
+
+    try:
+        result = await asyncio.to_thread(_download_model_files, model_name)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to download model {model_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to download model {model_name}: {e}")
+
+    status = "already_present" if result["existed_before"] else "downloaded"
+    return {
+        "status": status,
+        "model": model_name,
+        "model_path": result["model_path"],
+        "download_root": result["download_root"],
+        "elapsed": result["elapsed"],
+    }
+
+
+@app.post("/v1/models/warmup")
+async def warmup_model_endpoint(payload: _WarmupRequest):
+    model_name = _validate_model(payload.model)
+    device = _normalize_device(payload.device)
+    logger.info(f"Received request to warmup model {model_name} on device={device or 'auto'}")
+
+    started = time.time()
+    try:
+        engine = await asyncio.to_thread(WhisperEngine.get, model_name, device_override=device)
+    except Exception as e:
+        logger.error(f"Failed to warmup model {model_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to warmup model {model_name}: {e}")
+
+    return {
+        "status": "ready",
+        "model": model_name,
+        "device": engine.device,
+        "compute_type": engine.compute_type,
+        "load_time": time.time() - started,
+    }
 
 
 @app.post("/v1/audio/transcriptions")

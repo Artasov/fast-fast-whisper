@@ -5,3 +5,5 @@ faster-whisper>=1.0.3
 webvtt-py>=0.5.1
 av==12.3.0
 hf-xet>=1.1.10,<2.0.0
+pytest==9.0.1
+httpx==0.28.1
