@@ -67,16 +67,64 @@ curl -X POST http://localhost:8868/v1/audio/transcriptions \
   -F "response_format=json"
 ```
 
-### Дополнительные поля формы
+### Additional form fields
 
-Эндпоинт `/v1/audio/transcriptions` полностью повторяет форму OpenAI и принимает поля `file`, `model`, `prompt`, `response_format`, `temperature`, `language`, `device`. Поле `prompt` передаётся в Whisper как `initial_prompt`, поэтому с его помощью можно подсказать модели специфичные термины или формат.
+The `/v1/audio/transcriptions` endpoint mirrors the OpenAI API and accepts the fields `file`, `model`, `prompt`, `response_format`, `temperature`, `language`, and `device`. The `prompt` value is passed as Whisper's `initial_prompt`, so you can guide the model toward domain-specific vocabulary or formats.
 
 ```sh
 curl -X POST http://localhost:8868/v1/audio/transcriptions \
   -F "model=base" \
   -F "file=@sample.mp3" \
-  -F "prompt=Используй термины Python и REST API" \
+  -F "prompt=Use Python and REST API terminology" \
   -F "response_format=json"
+```
+
+### Model management endpoints
+
+To control model availability ahead of time the API exposes two helper endpoints.
+
+#### Download a model
+
+`POST /v1/models/download`
+
+```jsonc
+{
+  "model": "tiny" // required, one of the Whisper model ids
+}
+```
+
+- Downloads the specified model into the local `./models` directory (same storage layout as faster-whisper/HF cache).
+- Response payload contains `status` (`downloaded` or `already_present`), resolved `model_path`, and elapsed time in seconds.
+
+Example:
+
+```sh
+curl -X POST http://localhost:8868/v1/models/download \
+  -H "Content-Type: application/json" \
+  -d '{"model":"tiny"}'
+```
+
+#### Warm up a model
+
+`POST /v1/models/warmup`
+
+```jsonc
+{
+  "model": "tiny",     // required
+  "device": "gpu"      // optional, accepts cpu/gpu/cuda/auto
+}
+```
+
+- Lazily loads the model into memory on the requested device (GPU if available, otherwise CPU).
+- Response payload reports `device`, `compute_type`, and `load_time`.
+- Useful for health checks that need to ensure the model is ready before the first transcription request.
+
+Example:
+
+```sh
+curl -X POST http://localhost:8868/v1/models/warmup \
+  -H "Content-Type: application/json" \
+  -d '{"model":"tiny","device":"gpu"}'
 ```
 
 ## License
