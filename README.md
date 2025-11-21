@@ -127,6 +127,20 @@ curl -X POST http://localhost:8868/v1/models/warmup \
   -d '{"model":"tiny","device":"gpu"}'
 ```
 
+#### Check if a model is downloaded
+
+`GET /download/model/exists?model=tiny`
+
+- Returns `exists=true/false` without touching the model cache.
+- `model_path` points to the directory that already contains model files when `exists=true`.
+- Handy for orchestration scripts to decide whether they need to call `/v1/models/download`.
+
+Example:
+
+```sh
+curl "http://localhost:8868/download/model/exists?model=tiny"
+```
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) file.

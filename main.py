@@ -12,6 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
 from pydantic import BaseModel
 
+from model_catalog import MODEL_REGISTRY
+
 try:
     from faster_whisper import WhisperModel
 except Exception:  # pragma: no cover
@@ -30,6 +32,40 @@ logger = logging.getLogger(__name__)
 def _env(name: str, default: Optional[str] = None) -> Optional[str]:
     v = os.getenv(name)
     return v if v is not None else default
+
+
+def _model_storage_candidates(model_name: str) -> List[Path]:
+    """Possible directories where a model may be stored."""
+    models_dir = Path("models")
+    candidates = [models_dir / model_name]
+    model_info = MODEL_REGISTRY.get(model_name)
+    if model_info:
+        candidates.append(models_dir / model_info.storage_dir)
+
+    unique_candidates: List[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        marker = str(candidate.resolve())
+        if marker not in seen:
+            unique_candidates.append(candidate)
+            seen.add(marker)
+    return unique_candidates
+
+
+def _directory_has_files(directory: Path) -> bool:
+    if not directory.exists():
+        return False
+    for child in directory.rglob("*"):
+        if child.is_file():
+            return True
+    return False
+
+
+def _model_files_on_disk(model_name: str) -> tuple[bool, Optional[str]]:
+    for candidate in _model_storage_candidates(model_name):
+        if _directory_has_files(candidate):
+            return True, str(candidate)
+    return False, None
 
 
 def _check_cudnn_availability() -> bool:
@@ -459,6 +495,17 @@ async def download_model_endpoint(payload: _ModelActionRequest):
         "model_path": result["model_path"],
         "download_root": result["download_root"],
         "elapsed": result["elapsed"],
+    }
+
+
+@app.get("/download/model/exists")
+async def model_exists(model: str):
+    model_name = _validate_model(model)
+    exists, model_path = await asyncio.to_thread(_model_files_on_disk, model_name)
+    return {
+        "model": model_name,
+        "exists": exists,
+        "model_path": model_path,
     }
 
 

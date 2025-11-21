@@ -1,12 +1,13 @@
 from pathlib import Path
 
+
 import pytest
 from fastapi.testclient import TestClient
 
 import main
 from model_catalog import ModelRegistry
 
-pytestmark = pytest.mark.skipif(main.WhisperModel is None, reason="faster-whisper is not installed")
+REQUIRES_FASTER_WHISPER = pytest.mark.skipif(main.WhisperModel is None, reason="faster-whisper is not installed")
 
 TEST_MODEL = ModelRegistry.LargeV3
 
@@ -23,6 +24,7 @@ def client():
     return TestClient(main.app)
 
 
+@REQUIRES_FASTER_WHISPER
 def test_download_endpoint_creates_model_directory(client):
     response = client.post("/v1/models/download", json={"model": TEST_MODEL.api_name})
     assert response.status_code == 200
@@ -44,6 +46,7 @@ def test_download_endpoint_creates_model_directory(client):
     assert downloaded_files, "downloaded model directory must contain files"
 
 
+@REQUIRES_FASTER_WHISPER
 def test_warmup_endpoint_initializes_model_cpu(client):
     download_response = client.post("/v1/models/download", json={"model": TEST_MODEL.api_name})
     assert download_response.status_code == 200
@@ -63,6 +66,7 @@ def test_warmup_endpoint_initializes_model_cpu(client):
     assert getattr(engine, "_model", None) is not None, "engine must hold a loaded Whisper model"
 
 
+@REQUIRES_FASTER_WHISPER
 def test_warmup_endpoint_initializes_model_gpu(client):
     client.post("/v1/models/download", json={"model": TEST_MODEL.api_name})
 
@@ -80,3 +84,46 @@ def test_warmup_endpoint_initializes_model_gpu(client):
     engine = main.WhisperEngine._instances.get(cache_key)
     assert engine is not None, "warmup should cache the initialized GPU engine"
     assert getattr(engine, "_model", None) is not None, "engine must hold a loaded Whisper model"
+
+
+def test_model_exists_endpoint_reports_missing_model(client, monkeypatch, tmp_path):
+    non_existing_path = tmp_path / "models-cache" / TEST_MODEL.storage_dir
+
+    def fake_candidates(_: str):
+        return [non_existing_path]
+
+    monkeypatch.setattr(main, "_model_storage_candidates", fake_candidates)
+
+    response = client.get("/download/model/exists", params={"model": TEST_MODEL.api_name})
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["model"] == TEST_MODEL.api_name
+    assert payload["exists"] is False
+    assert payload["model_path"] is None
+
+
+def test_model_exists_endpoint_reports_present_model(client, monkeypatch, tmp_path):
+    model_root = tmp_path / "models-cache" / TEST_MODEL.storage_dir
+    snapshot_dir = model_root / "snapshots" / "fake"
+    snapshot_dir.mkdir(parents=True)
+    weights = snapshot_dir / "weights.bin"
+    weights.write_bytes(b"123")
+
+    def fake_candidates(_: str):
+        return [model_root]
+
+    monkeypatch.setattr(main, "_model_storage_candidates", fake_candidates)
+
+    response = client.get("/download/model/exists", params={"model": TEST_MODEL.api_name})
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["model"] == TEST_MODEL.api_name
+    assert payload["exists"] is True
+    assert payload["model_path"] == str(model_root)
+
+
+def test_model_exists_endpoint_validates_model_name(client):
+    response = client.get("/download/model/exists", params={"model": "unknown-model"})
+    assert response.status_code == 400
