@@ -4,7 +4,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 set "PROJECT_DIR=%CD%"
 set "PYTHONHOME="
-set "PYTHONPATH="
+set "PYTHONPATH=%PROJECT_DIR%\src"
 
 set "PY_VERSION=3.12.5"
 set "PY_ROOT=%PROJECT_DIR%\python_portable"

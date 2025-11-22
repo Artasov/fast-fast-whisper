@@ -48,6 +48,8 @@ source ./venv/bin/activate # For Linux / macOS
 ```sh
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8868 --reload
+# or (preferred package path)
+# PYTHONPATH=src uvicorn fast_fast_whisper.app:app --host 0.0.0.0 --port 8868 --reload
 ```
 
 ## Usage
@@ -68,8 +70,6 @@ curl -X POST http://localhost:8868/v1/audio/transcriptions \
 ```
 
 ### Additional form fields
-
-The `/v1/audio/transcriptions` endpoint mirrors the OpenAI API and accepts the fields `file`, `model`, `prompt`, `response_format`, `temperature`, `language`, and `device`. The `prompt` value is passed as Whisper's `initial_prompt`, so you can guide the model toward domain-specific vocabulary or formats.
 
 ```sh
 curl -X POST http://localhost:8868/v1/audio/transcriptions \
@@ -126,6 +126,15 @@ curl -X POST http://localhost:8868/v1/models/warmup \
   -H "Content-Type: application/json" \
   -d '{"model":"tiny","device":"gpu"}'
 ```
+
+### Concurrency guard
+
+By default the server processes only one transcription at a time to avoid GPU overload. Use the following environment variables to tune the behavior:
+
+- `WHISPER_MAX_CONCURRENT_TRANSCRIPTIONS` — maximum number of parallel `/v1/audio/*` jobs (default: `1`, use `0` or a negative value to disable the cap).
+- `WHISPER_ALLOW_WARMUP_DURING_TRANSCRIPTION` — set to `true` to allow `/v1/models/warmup` to run while a transcription is in progress (default: `false`, meaning warmup and transcription are mutually exclusive).
+
+If a request arrives while the limits are exceeded, the API returns HTTP `429`/`409` with an explanatory message.
 
 #### Check if a model is downloaded
 

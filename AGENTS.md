@@ -8,7 +8,6 @@ This mini-project provides a local HTTP API for speech recognition (Whisper) bas
 
 - OpenAI Whisper endpoints:
   - `POST /v1/audio/transcriptions` — transcription.
-  - `POST /v1/audio/translations` — translation to English.
   - `GET  /v1/models` — list of available models (emulation; one entry is sufficient).
 - Support form fields like OpenAI: `file`, `model`, `prompt`, `response_format`, `temperature`, `language`.
 - Support response formats: `json`, `text`, `srt`, `verbose_json`, `vtt`.
@@ -29,6 +28,8 @@ This mini-project provides a local HTTP API for speech recognition (Whisper) bas
 - `WHISPER_COMPUTE_TYPE` — compute type: `auto`/`int8`/`float16` etc. (default: `auto`).
 - `WHISPER_CPU_THREADS` — CPU threads (integer, default empty — auto).
 - `OPENAI_MODEL_ID` — `id` field value in `/v1/models` (default: `whisper-1`).
+- `WHISPER_MAX_CONCURRENT_TRANSCRIPTIONS` — максимум одновременно выполняемых транскрибаций (по умолчанию `1`, `0` = без лимита).
+- `WHISPER_ALLOW_WARMUP_DURING_TRANSCRIPTION` — разрешить параллельный `warmup` и транскрибацию (по умолчанию `false`).
 
 ## Example usage
 
@@ -51,16 +52,6 @@ curl -X POST http://localhost:8868/v1/audio/transcriptions \
   -F "response_format=json"
 ```
 
-Translation to English (SRT):
-
-```
-curl -X POST http://localhost:8868/v1/audio/translations \
-  -H "Content-Type: multipart/form-data" \
-  -F "model=whisper-1" \
-  -F "file=@sample.mp3" \
-  -F "response_format=srt"
-```
-
 ## Compatibility notes
 
 - The `model` field is accepted for compatibility, but the local model from `WHISPER_MODEL` is actually used.
@@ -69,4 +60,4 @@ curl -X POST http://localhost:8868/v1/audio/translations \
 ## Style and structure
 
 - Minimal changes, readability and simple architecture.
-- Everything in the project is concentrated in `main.py` for simplified startup.
+- Основной код хранится в `src/fast_fast_whisper`, файлы верхнего уровня только подключают пакет для обратной совместимости.

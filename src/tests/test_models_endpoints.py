@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
-from model_catalog import ModelRegistry
+from fast_fast_whisper.model_catalog import ModelRegistry
 
 REQUIRES_FASTER_WHISPER = pytest.mark.skipif(main.WhisperModel is None, reason="faster-whisper is not installed")
 
