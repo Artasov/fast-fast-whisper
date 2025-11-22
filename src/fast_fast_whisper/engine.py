@@ -187,16 +187,21 @@ class WhisperEngine:
             logger.warning("Ошибка при проверке CUDA (%s). Переключаемся на CPU", exc)
             self.device = "cpu"
 
+    def _base_model_kwargs(self, models_dir: Path, *, device: Optional[str] = None, compute_type: Optional[str] = None) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {
+            "model_size_or_path": self.model_name,
+            "device": device or self.device,
+            "compute_type": compute_type or self.compute_type,
+            "download_root": str(models_dir.absolute()),
+        }
+        if self.cpu_threads is not None:
+            kwargs["cpu_threads"] = self.cpu_threads
+        return kwargs
+
     def _load_model(self, models_dir: Path):
         try:
             logger.info("Загружаем модель %s на устройстве %s", self.model_name, self.device)
-            return WhisperModel(
-                model_size_or_path=self.model_name,
-                device=self.device,
-                compute_type=self.compute_type,
-                cpu_threads=self.cpu_threads,
-                download_root=str(models_dir.absolute()),
-            )
+            return WhisperModel(**self._base_model_kwargs(models_dir))
         except Exception as exc:  # pragma: no cover - зависит от окружения
             return self._recover_from_initialization_error(models_dir, exc)
 
@@ -213,13 +218,7 @@ class WhisperEngine:
             try:
                 self.device = "cpu"
                 self.compute_type = "float32"
-                return WhisperModel(
-                    model_size_or_path=self.model_name,
-                    device=self.device,
-                    compute_type=self.compute_type,
-                    cpu_threads=self.cpu_threads,
-                    download_root=str(models_dir.absolute()),
-                )
+                return WhisperModel(**self._base_model_kwargs(models_dir, device="cpu", compute_type="float32"))
             except Exception as cpu_exc:
                 logger.error("Даже на CPU загрузить модель не удалось: %s", cpu_exc)
                 raise
@@ -227,11 +226,13 @@ class WhisperEngine:
         logger.warning("Не удалось инициализировать модель с указанными параметрами: %s", exc)
         logger.info("Пробуем загрузить с минимальными параметрами...")
         try:
-            return WhisperModel(
-                model_size_or_path=self.model_name,
-                download_root=str(models_dir.absolute()),
-                cpu_threads=self.cpu_threads,
-            )
+            kwargs = {
+                "model_size_or_path": self.model_name,
+                "download_root": str(models_dir.absolute()),
+            }
+            if self.cpu_threads is not None:
+                kwargs["cpu_threads"] = self.cpu_threads
+            return WhisperModel(**kwargs)
         except Exception as critical:
             logger.error("Критическая ошибка загрузки модели: %s", critical)
             raise

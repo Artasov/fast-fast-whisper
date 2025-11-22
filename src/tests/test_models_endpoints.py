@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
+from fast_fast_whisper import engine as ff_engine
 from fast_fast_whisper.model_catalog import ModelRegistry
 
 REQUIRES_FASTER_WHISPER = pytest.mark.skipif(main.WhisperModel is None, reason="faster-whisper is not installed")
@@ -92,7 +93,7 @@ def test_model_exists_endpoint_reports_missing_model(client, monkeypatch, tmp_pa
     def fake_candidates(_: str):
         return [non_existing_path]
 
-    monkeypatch.setattr(main, "_model_storage_candidates", fake_candidates)
+    monkeypatch.setattr(ff_engine, "model_storage_candidates", fake_candidates, raising=False)
 
     response = client.get("/download/model/exists", params={"model": TEST_MODEL.api_name})
     assert response.status_code == 200
@@ -113,7 +114,7 @@ def test_model_exists_endpoint_reports_present_model(client, monkeypatch, tmp_pa
     def fake_candidates(_: str):
         return [model_root]
 
-    monkeypatch.setattr(main, "_model_storage_candidates", fake_candidates)
+    monkeypatch.setattr(ff_engine, "model_storage_candidates", fake_candidates, raising=False)
 
     response = client.get("/download/model/exists", params={"model": TEST_MODEL.api_name})
     assert response.status_code == 200
