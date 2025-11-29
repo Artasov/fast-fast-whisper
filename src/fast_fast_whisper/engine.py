@@ -123,6 +123,34 @@ class WhisperEngine:
         with cls._instances_lock:
             cls._instances.clear()
 
+    @staticmethod
+    def _cache_key(model_name: str, device_label: str) -> str:
+        return f"{model_name}_{device_label}"
+
+    @classmethod
+    def _find_cached(cls, model_name: str, requested_device: str) -> Optional["WhisperEngine"]:
+        device_label = (requested_device or "auto").strip().lower() or "auto"
+        if device_label == "gpu":
+            device_label = "cuda"
+
+        lookup_order = [cls._cache_key(model_name, device_label)]
+        if device_label == "auto":
+            # Reuse an already warmed-up engine regardless of how it was requested earlier.
+            lookup_order.extend(
+                [
+                    cls._cache_key(model_name, "cuda"),
+                    cls._cache_key(model_name, "cpu"),
+                ]
+            )
+        elif device_label == "cuda":
+            lookup_order.append(cls._cache_key(model_name, "gpu"))
+
+        for key in lookup_order:
+            engine = cls._instances.get(key)
+            if engine is not None:
+                return engine
+        return None
+
     def __init__(self, model_name: str, device_override: Optional[str] = None) -> None:
         self.model_name = model_name
         self.device = device_override or env("WHISPER_DEVICE", "auto")
@@ -243,11 +271,20 @@ class WhisperEngine:
 
     @classmethod
     def get(cls, model_name: str, device_override: Optional[str] = None) -> "WhisperEngine":
-        cache_key = f"{model_name}_{device_override or 'auto'}"
+        requested_device = device_override or env("WHISPER_DEVICE", "auto") or "auto"
+
         with cls._instances_lock:
-            if cache_key not in cls._instances:
-                cls._instances[cache_key] = WhisperEngine(model_name, device_override)
-            return cls._instances[cache_key]
+            cached = cls._find_cached(model_name, requested_device)
+            if cached is not None:
+                return cached
+
+        engine = WhisperEngine(model_name, device_override)
+        canonical_key = cls._cache_key(model_name, engine.device)
+        requested_key = cls._cache_key(model_name, (requested_device or "auto").strip().lower() or "auto")
+        with cls._instances_lock:
+            cls._instances[canonical_key] = engine
+            cls._instances[requested_key] = engine
+        return engine
 
     def transcribe(
         self,

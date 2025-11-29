@@ -52,6 +52,8 @@ def test_transcribe_calls_are_serialized(monkeypatch):
     release_first = threading.Event()
     call_order: list[str] = []
 
+    monkeypatch.setenv("WHISPER_DEVICE", "cpu")
+
     class DummyModel:
         def __init__(self, **_: object) -> None:
             pass
@@ -89,3 +91,28 @@ def test_transcribe_calls_are_serialized(monkeypatch):
 
     assert call_order == ["call", "call"]
     assert results == ["hi", "hi"]
+
+
+def test_auto_and_cuda_share_one_cached_engine(monkeypatch):
+    monkeypatch.setenv("WHISPER_DEVICE", "auto")
+
+    class DummyModel:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def transcribe(self, **_: object):
+            return [_DummySegment("ok")], _DummyInfo()
+
+    def fake_autodetect(self):
+        # Force autodetect to pick CUDA without touching real hardware.
+        self.device = "cuda"
+
+    monkeypatch.setattr(ff_engine, "WhisperModel", DummyModel)
+    monkeypatch.setattr(ff_engine.WhisperEngine, "_autodetect_device", fake_autodetect, raising=False)
+    ff_engine.WhisperEngine.clear_cache()
+
+    auto_engine = ff_engine.WhisperEngine.get("demo")
+    cuda_engine = ff_engine.WhisperEngine.get("demo", device_override="cuda")
+    gpu_engine = ff_engine.WhisperEngine.get("demo", device_override="gpu")
+
+    assert auto_engine is cuda_engine is gpu_engine
