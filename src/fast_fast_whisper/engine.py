@@ -4,6 +4,7 @@ import gc
 import io
 import logging
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -115,16 +116,19 @@ def get_cuda_diagnostics() -> str:
 
 class WhisperEngine:
     _instances: Dict[str, "WhisperEngine"] = {}
+    _instances_lock = threading.Lock()
 
     @classmethod
     def clear_cache(cls) -> None:
-        cls._instances.clear()
+        with cls._instances_lock:
+            cls._instances.clear()
 
     def __init__(self, model_name: str, device_override: Optional[str] = None) -> None:
         self.model_name = model_name
         self.device = device_override or env("WHISPER_DEVICE", "auto")
         self.compute_type = env("WHISPER_COMPUTE_TYPE", "auto")
         self.cpu_threads = int(env("WHISPER_CPU_THREADS", "0") or 0) or None
+        self._transcribe_lock = threading.Lock()
 
         if self.device == "auto":
             self._autodetect_device()
@@ -240,9 +244,10 @@ class WhisperEngine:
     @classmethod
     def get(cls, model_name: str, device_override: Optional[str] = None) -> "WhisperEngine":
         cache_key = f"{model_name}_{device_override or 'auto'}"
-        if cache_key not in cls._instances:
-            cls._instances[cache_key] = WhisperEngine(model_name, device_override)
-        return cls._instances[cache_key]
+        with cls._instances_lock:
+            if cache_key not in cls._instances:
+                cls._instances[cache_key] = WhisperEngine(model_name, device_override)
+            return cls._instances[cache_key]
 
     def transcribe(
         self,
@@ -252,75 +257,80 @@ class WhisperEngine:
         translate: bool = False,
         prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
-        started = time.time()
-        logger.info(
-            "Starting recognition: device=%s, compute_type=%s, language=%s, temperature=%s, translate=%s, prompt=%s",
-            self.device,
-            self.compute_type,
-            language,
-            temperature,
-            translate,
-            "set" if prompt else "not set",
-        )
-
-        transcribe_kwargs: Dict[str, Any] = {
-            "audio": file_like,
-            "task": "translate" if translate else "transcribe",
-        }
-        if language is not None:
-            transcribe_kwargs["language"] = language
-        if temperature is not None:
-            transcribe_kwargs["temperature"] = temperature
-        if prompt is not None:
-            transcribe_kwargs["initial_prompt"] = prompt
-
-        try:
-            segments_obj, info = self._model.transcribe(**transcribe_kwargs)
-            processing_time = time.time() - started
-            logger.info("Recognition completed in %.2f seconds", processing_time)
-        except Exception as exc:
-            logger.error("Ошибка во время распознавания: %s", exc)
-            logger.error("Параметры распознавания: %s", transcribe_kwargs)
-            raise
-
-        text_parts: List[str] = []
-        segments: List[Dict[str, Any]] = []
-        for idx, seg in enumerate(segments_obj):
-            text_parts.append(seg.text or "")
-            segments.append(
-                {
-                    "id": idx,
-                    "seek": 0,
-                    "start": float(seg.start) if seg.start is not None else 0.0,
-                    "end": float(seg.end) if seg.end is not None else 0.0,
-                    "text": seg.text or "",
-                    "tokens": [],
-                    "temperature": 0.0,
-                    "avg_logprob": 0.0,
-                    "compression_ratio": 0.0,
-                    "no_speech_prob": 0.0,
-                }
+        lock_wait_started = time.time()
+        with self._transcribe_lock:
+            lock_wait = time.time() - lock_wait_started
+            started = time.time()
+            logger.info(
+                "Starting recognition: device=%s, compute_type=%s, language=%s, temperature=%s, translate=%s, "
+                "prompt=%s, lock_wait=%.3fs",
+                self.device,
+                self.compute_type,
+                language,
+                temperature,
+                translate,
+                "set" if prompt else "not set",
+                lock_wait,
             )
 
-        result_text = ("".join(text_parts)).strip()
-        result_duration = float(getattr(info, "duration", time.time() - started) or 0.0)
-        detected_language = getattr(info, "language", None)
+            transcribe_kwargs: Dict[str, Any] = {
+                "audio": file_like,
+                "task": "translate" if translate else "transcribe",
+            }
+            if language is not None:
+                transcribe_kwargs["language"] = language
+            if temperature is not None:
+                transcribe_kwargs["temperature"] = temperature
+            if prompt is not None:
+                transcribe_kwargs["initial_prompt"] = prompt
 
-        logger.info(
-            "Recognition result: language=%s, duration=%.2fs, segments=%s, text='%s%s'",
-            detected_language,
-            result_duration,
-            len(segments),
-            result_text[:100],
-            "..." if len(result_text) > 100 else "",
-        )
+            try:
+                segments_obj, info = self._model.transcribe(**transcribe_kwargs)
+            except Exception as exc:
+                logger.error("Ошибка во время распознавания: %s", exc)
+                logger.error("Параметры распознавания: %s", transcribe_kwargs)
+                raise
 
-        return {
-            "language": detected_language,
-            "duration": result_duration,
-            "text": result_text,
-            "segments": segments,
-        }
+            text_parts: List[str] = []
+            segments: List[Dict[str, Any]] = []
+            for idx, seg in enumerate(segments_obj):
+                text_parts.append(seg.text or "")
+                segments.append(
+                    {
+                        "id": idx,
+                        "seek": 0,
+                        "start": float(seg.start) if seg.start is not None else 0.0,
+                        "end": float(seg.end) if seg.end is not None else 0.0,
+                        "text": seg.text or "",
+                        "tokens": [],
+                        "temperature": 0.0,
+                        "avg_logprob": 0.0,
+                        "compression_ratio": 0.0,
+                        "no_speech_prob": 0.0,
+                    }
+                )
+
+            processing_time = time.time() - started
+            result_text = ("".join(text_parts)).strip()
+            result_duration = float(getattr(info, "duration", processing_time) or 0.0)
+            detected_language = getattr(info, "language", None)
+
+            logger.info(
+                "Recognition result: language=%s, duration=%.2fs, segments=%s, text='%s%s', lock_wait=%.3fs",
+                detected_language,
+                result_duration,
+                len(segments),
+                result_text[:100],
+                "..." if len(result_text) > 100 else "",
+                lock_wait,
+            )
+
+            return {
+                "language": detected_language,
+                "duration": result_duration,
+                "text": result_text,
+                "segments": segments,
+            }
 
 
 def download_model_files(model_name: str) -> Dict[str, Any]:
