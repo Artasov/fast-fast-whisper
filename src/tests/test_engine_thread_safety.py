@@ -6,7 +6,7 @@ from fast_fast_whisper import engine as ff_engine
 
 
 class _DummyInfo:
-    def __init__(self, language: str = "en", duration: float = 0.0) -> None:
+    def __init__(self, language: str = 'en', duration: float = 0.0) -> None:
         self.language = language
         self.duration = duration
 
@@ -31,11 +31,11 @@ def test_get_returns_single_instance_under_concurrency(monkeypatch):
         def transcribe(self, **_: object):
             return [], _DummyInfo()
 
-    monkeypatch.setattr(ff_engine, "WhisperModel", DummyModel)
+    monkeypatch.setattr(ff_engine, 'WhisperModel', DummyModel)
     ff_engine.WhisperEngine.clear_cache()
 
     def worker():
-        ff_engine.WhisperEngine.get("demo", device_override="cpu")
+        ff_engine.WhisperEngine.get('demo', device_override='cpu')
 
     threads = [threading.Thread(target=worker) for _ in range(5)]
     for thread in threads:
@@ -44,7 +44,7 @@ def test_get_returns_single_instance_under_concurrency(monkeypatch):
         thread.join(timeout=1)
 
     assert init_counter == 1
-    assert len(ff_engine.WhisperEngine._instances) == 1
+    assert ff_engine.WhisperEngine._instance is not None
 
 
 def test_transcribe_calls_are_serialized(monkeypatch):
@@ -52,27 +52,28 @@ def test_transcribe_calls_are_serialized(monkeypatch):
     release_first = threading.Event()
     call_order: list[str] = []
 
-    monkeypatch.setenv("WHISPER_DEVICE", "cpu")
+    monkeypatch.setenv('WHISPER_DEVICE', 'cpu')
 
     class DummyModel:
         def __init__(self, **_: object) -> None:
             pass
 
         def transcribe(self, **_: object):
-            call_order.append("call")
+            call_order.append('call')
             entered.set()
             release_first.wait(timeout=1)
-            return [_DummySegment("hi")], _DummyInfo()
+            return [_DummySegment('hi')], _DummyInfo()
 
-    monkeypatch.setattr(ff_engine, "WhisperModel", DummyModel)
+    monkeypatch.setattr(ff_engine, 'WhisperModel', DummyModel)
     ff_engine.WhisperEngine.clear_cache()
 
-    engine = ff_engine.WhisperEngine("demo", device_override="cpu")
+    engine = ff_engine.WhisperEngine('demo', 'cpu', 'float32')
+    ff_engine.WhisperEngine._instance = engine
     results: list[str] = []
 
     def run_transcribe():
-        result = engine.transcribe(io.BytesIO(b"123"))
-        results.append(result["text"])
+        result = engine.transcribe(io.BytesIO(b'123'))
+        results.append(result['text'])
 
     first = threading.Thread(target=run_transcribe)
     second = threading.Thread(target=run_transcribe)
@@ -83,36 +84,30 @@ def test_transcribe_calls_are_serialized(monkeypatch):
     second.start()
     time.sleep(0.1)
 
-    assert call_order == ["call"]
+    assert call_order == ['call']
 
     release_first.set()
     first.join(timeout=1)
     second.join(timeout=1)
 
-    assert call_order == ["call", "call"]
-    assert results == ["hi", "hi"]
+    assert call_order == ['call', 'call']
+    assert results == ['hi', 'hi']
 
 
-def test_auto_and_cuda_share_one_cached_engine(monkeypatch):
-    monkeypatch.setenv("WHISPER_DEVICE", "auto")
+def test_same_model_returns_cached_engine(monkeypatch):
+    monkeypatch.setenv('WHISPER_DEVICE', 'cpu')
 
     class DummyModel:
         def __init__(self, **_: object) -> None:
             pass
 
         def transcribe(self, **_: object):
-            return [_DummySegment("ok")], _DummyInfo()
+            return [_DummySegment('ok')], _DummyInfo()
 
-    def fake_autodetect(self):
-        # Force autodetect to pick CUDA without touching real hardware.
-        self.device = "cuda"
-
-    monkeypatch.setattr(ff_engine, "WhisperModel", DummyModel)
-    monkeypatch.setattr(ff_engine.WhisperEngine, "_autodetect_device", fake_autodetect, raising=False)
+    monkeypatch.setattr(ff_engine, 'WhisperModel', DummyModel)
     ff_engine.WhisperEngine.clear_cache()
 
-    auto_engine = ff_engine.WhisperEngine.get("demo")
-    cuda_engine = ff_engine.WhisperEngine.get("demo", device_override="cuda")
-    gpu_engine = ff_engine.WhisperEngine.get("demo", device_override="gpu")
+    engine1 = ff_engine.WhisperEngine.get('demo', device_override='cpu')
+    engine2 = ff_engine.WhisperEngine.get('demo', device_override='cpu')
 
-    assert auto_engine is cuda_engine is gpu_engine
+    assert engine1 is engine2

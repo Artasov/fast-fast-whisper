@@ -3,412 +3,255 @@ from __future__ import annotations
 import gc
 import io
 import logging
-import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from .config import env
 from .model_catalog import MODEL_REGISTRY
 
-try:  # pragma: no cover - import guarded for optional dependency
+try:
     from faster_whisper import WhisperModel
-except Exception:  # pragma: no cover - preserved from legacy behavior
-    WhisperModel = None  # type: ignore
+except Exception:
+    WhisperModel = None
 
 logger = logging.getLogger(__name__)
 
-
-def model_storage_candidates(model_name: str) -> List[Path]:
-    models_dir = Path("models")
-    candidates = [models_dir / model_name]
-    model_info = MODEL_REGISTRY.get(model_name)
-    if model_info:
-        candidates.append(models_dir / model_info.storage_dir)
-
-    unique: List[Path] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        marker = str(candidate.resolve())
-        if marker not in seen:
-            unique.append(candidate)
-            seen.add(marker)
-    return unique
+# Опционально torch для очистки GPU
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+    torch = None
 
 
-def _directory_has_files(directory: Path) -> bool:
-    if not directory.exists():
+def _clear_gpu_memory() -> None:
+    """Освобождает GPU память после транскрипции."""
+    gc.collect()
+    if HAS_TORCH and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+
+def _check_cuda_available() -> bool:
+    """Проверяет доступность CUDA."""
+    try:
+        import ctranslate2
+        cuda_types = ctranslate2.get_supported_compute_types('cuda')
+        return bool(cuda_types)
+    except Exception:
         return False
-    for child in directory.rglob("*"):
-        if child.is_file():
-            return True
-    return False
 
 
-def model_files_on_disk(model_name: str) -> Tuple[bool, Optional[str]]:
-    for candidate in model_storage_candidates(model_name):
-        if _directory_has_files(candidate):
-            return True, str(candidate)
+def model_files_on_disk(model_name: str) -> tuple[bool, Optional[str]]:
+    """Проверяет наличие файлов модели на диске."""
+    models_dir = Path('models')
+    
+    # Прямая папка модели
+    direct = models_dir / model_name
+    if direct.exists() and any(direct.rglob('*')):
+        return True, str(direct)
+    
+    # HuggingFace cache формат
+    info = MODEL_REGISTRY.get(model_name)
+    if info:
+        cache_dir = models_dir / info.storage_dir
+        if cache_dir.exists() and any(cache_dir.rglob('*')):
+            return True, str(cache_dir)
+    
     return False, None
 
 
-def _check_cudnn_availability() -> bool:
-    try:
-        import ctranslate2
-
-        contains_devices = getattr(ctranslate2, "contains_available_devices", None)
-        if callable(contains_devices):
-            is_available = bool(contains_devices("cuda"))
-        else:
-            cuda_types = ctranslate2.get_supported_compute_types("cuda")
-            is_available = bool(cuda_types)
-
-        if not is_available:
-            logger.warning("CUDA/cuDNN устройства недоступны для CTranslate2")
-        return is_available
-    except Exception as exc:  # pragma: no cover - depends on system libs
-        error_msg = str(exc).lower()
-        if any(keyword in error_msg for keyword in ["cudnn", "dll", "library", "tensor", "descriptor"]):
-            logger.warning("cuDNN недоступен: %s", exc)
-            return False
-        return True
-
-
-def _check_cuda_toolkit() -> bool:
-    try:
-        result = subprocess.run(["nvcc", "--version"], capture_output=True, text=True, timeout=5)
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):  # pragma: no cover
-        return False
-
-
-def get_cuda_diagnostics() -> str:
-    info: List[str] = []
-
-    try:
-        result = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
-            info.append("✓ NVIDIA driver installed")
-        else:
-            info.append("✗ NVIDIA driver not found")
-    except Exception:  # pragma: no cover
-        info.append("✗ Failed to check NVIDIA driver")
-
-    if _check_cuda_toolkit():
-        info.append("✓ CUDA Toolkit installed")
-    else:
-        info.append("✗ CUDA Toolkit not installed")
-
-    try:
-        import ctranslate2
-
-        cuda_types = ctranslate2.get_supported_compute_types("cuda")
-        if cuda_types:
-            info.append(f"✓ ctranslate2 supports CUDA: {cuda_types}")
-        else:
-            info.append("✗ ctranslate2 does not support CUDA")
-    except Exception as exc:  # pragma: no cover
-        info.append(f"✗ ctranslate2 error: {exc}")
-
-    return "\n".join(info)
+def model_storage_candidates(model_name: str) -> list[Path]:
+    """Возвращает возможные пути хранения модели."""
+    models_dir = Path('models')
+    candidates = [models_dir / model_name]
+    
+    info = MODEL_REGISTRY.get(model_name)
+    if info:
+        candidates.append(models_dir / info.storage_dir)
+    
+    return list(dict.fromkeys(candidates))  # unique, preserving order
 
 
 class WhisperEngine:
-    _instances: Dict[str, "WhisperEngine"] = {}
-    _instances_lock = threading.Lock()
-
+    """Singleton-обёртка над faster-whisper с ленивой загрузкой."""
+    
+    _instance: Optional['WhisperEngine'] = None
+    _lock = threading.Lock()
+    _transcribe_lock = threading.Lock()
+    
+    def __init__(self, model_name: str, device: str, compute_type: str):
+        if WhisperModel is None:
+            raise RuntimeError('faster-whisper не установлен')
+        
+        self.model_name = model_name
+        self.device = device
+        self.compute_type = compute_type
+        self._last_used = time.time()
+        
+        models_dir = Path('models')
+        models_dir.mkdir(exist_ok=True)
+        
+        logger.info('Загрузка модели %s (device=%s, compute_type=%s)', model_name, device, compute_type)
+        
+        try:
+            self._model = WhisperModel(
+                model_size_or_path=model_name,
+                device=device,
+                compute_type=compute_type,
+                download_root=str(models_dir.absolute()),
+            )
+        except Exception as e:
+            # Fallback на CPU при ошибках CUDA
+            if device == 'cuda' and 'cuda' in str(e).lower():
+                logger.warning('CUDA ошибка, переключаюсь на CPU: %s', e)
+                self.device = 'cpu'
+                self.compute_type = 'float32'
+                self._model = WhisperModel(
+                    model_size_or_path=model_name,
+                    device='cpu',
+                    compute_type='float32',
+                    download_root=str(models_dir.absolute()),
+                )
+            else:
+                raise
+    
+    @classmethod
+    def get(cls, model_name: str, device_override: Optional[str] = None) -> 'WhisperEngine':
+        """Получает или создаёт экземпляр движка."""
+        device = device_override or env('WHISPER_DEVICE', 'auto')
+        if device == 'gpu':
+            device = 'cuda'
+        
+        # Автоопределение device
+        if device == 'auto':
+            device = 'cuda' if _check_cuda_available() else 'cpu'
+        
+        compute_type = env('WHISPER_COMPUTE_TYPE', 'auto')
+        if compute_type == 'auto':
+            compute_type = 'float16' if device == 'cuda' else 'float32'
+        
+        with cls._lock:
+            # Переиспользуем если модель и device совпадают
+            if cls._instance is not None:
+                if cls._instance.model_name == model_name and cls._instance.device == device:
+                    cls._instance._last_used = time.time()
+                    return cls._instance
+                # Освобождаем старую модель
+                cls._unload_model()
+            
+            cls._instance = WhisperEngine(model_name, device, compute_type)
+            return cls._instance
+    
+    @classmethod
+    def _unload_model(cls) -> None:
+        """Выгружает модель и освобождает память."""
+        if cls._instance is not None:
+            logger.info('Выгрузка модели %s', cls._instance.model_name)
+            del cls._instance._model
+            cls._instance = None
+            _clear_gpu_memory()
+    
     @classmethod
     def clear_cache(cls) -> None:
-        with cls._instances_lock:
-            cls._instances.clear()
-
-    @staticmethod
-    def _cache_key(model_name: str, device_label: str) -> str:
-        return f"{model_name}_{device_label}"
-
-    @classmethod
-    def _find_cached(cls, model_name: str, requested_device: str) -> Optional["WhisperEngine"]:
-        device_label = (requested_device or "auto").strip().lower() or "auto"
-        if device_label == "gpu":
-            device_label = "cuda"
-
-        lookup_order = [cls._cache_key(model_name, device_label)]
-        if device_label == "auto":
-            # Reuse an already warmed-up engine regardless of how it was requested earlier.
-            lookup_order.extend(
-                [
-                    cls._cache_key(model_name, "cuda"),
-                    cls._cache_key(model_name, "cpu"),
-                ]
-            )
-        elif device_label == "cuda":
-            lookup_order.append(cls._cache_key(model_name, "gpu"))
-
-        for key in lookup_order:
-            engine = cls._instances.get(key)
-            if engine is not None:
-                return engine
-        return None
-
-    def __init__(self, model_name: str, device_override: Optional[str] = None) -> None:
-        self.model_name = model_name
-        self.device = device_override or env("WHISPER_DEVICE", "auto")
-        self.compute_type = env("WHISPER_COMPUTE_TYPE", "auto")
-        self.cpu_threads = int(env("WHISPER_CPU_THREADS", "0") or 0) or None
-        self._transcribe_lock = threading.Lock()
-
-        if self.device == "auto":
-            self._autodetect_device()
-        elif self.device == "cuda":
-            self._validate_requested_cuda()
-
-        if env("FORCE_CPU", "").lower() in ("true", "1", "yes"):
-            self.device = "cpu"
-            logger.info("Forced CPU usage (FORCE_CPU=true)")
-
-        if self.compute_type == "auto":
-            self.compute_type = "float16" if self.device == "cuda" else "float32"
-
-        logger.info(
-            "Initializing model %s with parameters: device=%s, compute_type=%s",
-            model_name,
-            self.device,
-            self.compute_type,
-        )
-
-        if WhisperModel is None:
-            raise RuntimeError("faster-whisper is not installed. Ensure dependencies are installed.")
-
-        models_dir = Path("models")
-        models_dir.mkdir(exist_ok=True)
-
-        self._model = self._load_model(models_dir)
-
-    def _autodetect_device(self) -> None:
-        try:
-            import ctranslate2
-
-            cuda_types = ctranslate2.get_supported_compute_types("cuda")
-            if cuda_types:
-                if _check_cudnn_availability():
-                    self.device = "cuda"
-                    logger.info("CUDA и cuDNN доступны, используем GPU (%s)", cuda_types)
-                else:
-                    self.device = "cpu"
-                    logger.warning("CUDA доступна, но cuDNN нет — используем CPU")
-            else:
-                self.device = "cpu"
-                logger.info("CUDA недоступна, используем CPU")
-        except Exception as exc:
-            logger.warning("Не удалось проверить CUDA: %s", exc)
-            self.device = "cpu"
-
-    def _validate_requested_cuda(self) -> None:
-        try:
-            import ctranslate2
-
-            cuda_types = ctranslate2.get_supported_compute_types("cuda")
-            if not cuda_types:
-                logger.warning("CUDA недоступна, хотя явно запрошена. Переключаемся на CPU")
-                self.device = "cpu"
-            elif not _check_cudnn_availability():
-                logger.warning("cuDNN недоступен, хотя запрошен CUDA. Переключаемся на CPU")
-                self.device = "cpu"
-        except Exception as exc:
-            logger.warning("Ошибка при проверке CUDA (%s). Переключаемся на CPU", exc)
-            self.device = "cpu"
-
-    def _base_model_kwargs(self, models_dir: Path, *, device: Optional[str] = None, compute_type: Optional[str] = None) -> Dict[str, Any]:
-        kwargs: Dict[str, Any] = {
-            "model_size_or_path": self.model_name,
-            "device": device or self.device,
-            "compute_type": compute_type or self.compute_type,
-            "download_root": str(models_dir.absolute()),
-        }
-        if self.cpu_threads is not None:
-            kwargs["cpu_threads"] = self.cpu_threads
-        return kwargs
-
-    def _load_model(self, models_dir: Path):
-        try:
-            logger.info("Загружаем модель %s на устройстве %s", self.model_name, self.device)
-            return WhisperModel(**self._base_model_kwargs(models_dir))
-        except Exception as exc:  # pragma: no cover - зависит от окружения
-            return self._recover_from_initialization_error(models_dir, exc)
-
-    def _recover_from_initialization_error(self, models_dir: Path, exc: Exception):
-        error_msg = str(exc).lower()
-        is_cudnn_error = any(
-            keyword in error_msg for keyword in ["cudnn", "cuda", "gpu", "tensor", "descriptor", "dll", "library"]
-        )
-
-        if is_cudnn_error and self.device == "cuda":
-            logger.error("Ошибка CUDA/cuDNN: %s", exc)
-            logger.error("Диагностика:\n%s", get_cuda_diagnostics())
-            logger.info("Пробуем переключиться на CPU...")
-            try:
-                self.device = "cpu"
-                self.compute_type = "float32"
-                return WhisperModel(**self._base_model_kwargs(models_dir, device="cpu", compute_type="float32"))
-            except Exception as cpu_exc:
-                logger.error("Даже на CPU загрузить модель не удалось: %s", cpu_exc)
-                raise
-
-        logger.warning("Не удалось инициализировать модель с указанными параметрами: %s", exc)
-        logger.info("Пробуем загрузить с минимальными параметрами...")
-        try:
-            kwargs = {
-                "model_size_or_path": self.model_name,
-                "download_root": str(models_dir.absolute()),
-            }
-            if self.cpu_threads is not None:
-                kwargs["cpu_threads"] = self.cpu_threads
-            return WhisperModel(**kwargs)
-        except Exception as critical:
-            logger.error("Критическая ошибка загрузки модели: %s", critical)
-            raise
-
-    @classmethod
-    def get(cls, model_name: str, device_override: Optional[str] = None) -> "WhisperEngine":
-        requested_device = device_override or env("WHISPER_DEVICE", "auto") or "auto"
-
-        with cls._instances_lock:
-            cached = cls._find_cached(model_name, requested_device)
-            if cached is not None:
-                return cached
-
-        engine = WhisperEngine(model_name, device_override)
-        canonical_key = cls._cache_key(model_name, engine.device)
-        requested_key = cls._cache_key(model_name, (requested_device or "auto").strip().lower() or "auto")
-        with cls._instances_lock:
-            cls._instances[canonical_key] = engine
-            cls._instances[requested_key] = engine
-        return engine
-
+        """Очищает кэш моделей."""
+        with cls._lock:
+            cls._unload_model()
+    
     def transcribe(
         self,
         file_like: io.BufferedReader | io.BytesIO,
         language: Optional[str] = None,
         temperature: Optional[float] = None,
-        translate: bool = False,
         prompt: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        lock_wait_started = time.time()
+    ) -> dict[str, Any]:
+        """Выполняет транскрипцию аудио."""
+        self._last_used = time.time()
+        
         with self._transcribe_lock:
-            lock_wait = time.time() - lock_wait_started
             started = time.time()
-            logger.info(
-                "Starting recognition: device=%s, compute_type=%s, language=%s, temperature=%s, translate=%s, "
-                "prompt=%s, lock_wait=%.3fs",
-                self.device,
-                self.compute_type,
-                language,
-                temperature,
-                translate,
-                "set" if prompt else "not set",
-                lock_wait,
-            )
-
-            transcribe_kwargs: Dict[str, Any] = {
-                "audio": file_like,
-                "task": "translate" if translate else "transcribe",
-            }
-            if language is not None:
-                transcribe_kwargs["language"] = language
+            logger.info('Начало транскрипции (device=%s, language=%s)', self.device, language)
+            
+            kwargs: dict[str, Any] = {'audio': file_like}
+            if language:
+                kwargs['language'] = language
             if temperature is not None:
-                transcribe_kwargs["temperature"] = temperature
-            if prompt is not None:
-                transcribe_kwargs["initial_prompt"] = prompt
-
+                kwargs['temperature'] = temperature
+            if prompt:
+                kwargs['initial_prompt'] = prompt
+            
             try:
-                segments_obj, info = self._model.transcribe(**transcribe_kwargs)
-            except Exception as exc:
-                logger.error("Ошибка во время распознавания: %s", exc)
-                logger.error("Параметры распознавания: %s", transcribe_kwargs)
-                raise
-
-            text_parts: List[str] = []
-            segments: List[Dict[str, Any]] = []
-            for idx, seg in enumerate(segments_obj):
-                text_parts.append(seg.text or "")
-                segments.append(
-                    {
-                        "id": idx,
-                        "seek": 0,
-                        "start": float(seg.start) if seg.start is not None else 0.0,
-                        "end": float(seg.end) if seg.end is not None else 0.0,
-                        "text": seg.text or "",
-                        "tokens": [],
-                        "temperature": 0.0,
-                        "avg_logprob": 0.0,
-                        "compression_ratio": 0.0,
-                        "no_speech_prob": 0.0,
-                    }
+                segments_gen, info = self._model.transcribe(**kwargs)
+                
+                # ВАЖНО: полностью consume generator чтобы не было утечек
+                segments = []
+                text_parts = []
+                for idx, seg in enumerate(segments_gen):
+                    text_parts.append(seg.text or '')
+                    segments.append({
+                        'id': idx,
+                        'start': float(seg.start) if seg.start else 0.0,
+                        'end': float(seg.end) if seg.end else 0.0,
+                        'text': seg.text or '',
+                    })
+                
+                result = {
+                    'language': getattr(info, 'language', None),
+                    'duration': float(getattr(info, 'duration', 0) or 0),
+                    'text': ''.join(text_parts).strip(),
+                    'segments': segments,
+                }
+                
+                elapsed = time.time() - started
+                logger.info(
+                    'Транскрипция завершена: %d сегментов, %.2fs, язык=%s',
+                    len(segments), elapsed, result['language']
                 )
-
-            processing_time = time.time() - started
-            result_text = ("".join(text_parts)).strip()
-            result_duration = float(getattr(info, "duration", processing_time) or 0.0)
-            detected_language = getattr(info, "language", None)
-
-            logger.info(
-                "Recognition result: language=%s, duration=%.2fs, segments=%s, text='%s%s', lock_wait=%.3fs",
-                detected_language,
-                result_duration,
-                len(segments),
-                result_text[:100],
-                "..." if len(result_text) > 100 else "",
-                lock_wait,
-            )
-
-            return {
-                "language": detected_language,
-                "duration": result_duration,
-                "text": result_text,
-                "segments": segments,
-            }
+                
+                return result
+                
+            finally:
+                # Очистка памяти после каждой транскрипции
+                _clear_gpu_memory()
 
 
-def download_model_files(model_name: str) -> Dict[str, Any]:
+def download_model_files(model_name: str) -> dict[str, Any]:
+    """Скачивает файлы модели."""
     if WhisperModel is None:
-        raise RuntimeError("faster-whisper is not installed")
-
-    models_dir = Path("models")
+        raise RuntimeError('faster-whisper не установлен')
+    
+    models_dir = Path('models')
     models_dir.mkdir(exist_ok=True)
-
-    model_dir = models_dir / model_name
-    existed_before = model_dir.exists()
+    
+    existed_before, _ = model_files_on_disk(model_name)
     started = time.time()
-    downloader = None
-
-    try:
-        downloader = WhisperModel(
-            model_size_or_path=model_name,
-            device="cpu",
-            compute_type="float32",
-            download_root=str(models_dir.absolute()),
-        )
-        logger.info("Model %s downloaded into %s", model_name, model_dir)
-    finally:
-        if downloader is not None:
-            del downloader
-            gc.collect()
-
+    
+    # Загружаем на CPU для скачивания
+    model = WhisperModel(
+        model_size_or_path=model_name,
+        device='cpu',
+        compute_type='float32',
+        download_root=str(models_dir.absolute()),
+    )
+    del model
+    _clear_gpu_memory()
+    
     return {
-        "model": model_name,
-        "download_root": str(models_dir.absolute()),
-        "model_path": str(model_dir),
-        "existed_before": existed_before,
-        "elapsed": time.time() - started,
+        'model': model_name,
+        'download_root': str(models_dir.absolute()),
+        'model_path': str(models_dir / model_name),
+        'existed_before': existed_before,
+        'elapsed': time.time() - started,
     }
 
 
 __all__ = [
-    "WhisperEngine",
-    "WhisperModel",
-    "download_model_files",
-    "get_cuda_diagnostics",
-    "model_files_on_disk",
-    "model_storage_candidates",
+    'WhisperEngine',
+    'WhisperModel',
+    'download_model_files',
+    'model_files_on_disk',
+    'model_storage_candidates',
 ]
